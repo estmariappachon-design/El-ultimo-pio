@@ -1,4 +1,5 @@
 using UnityEngine;
+using TMPro;
 
 public class LobbyNetworkManager : MonoBehaviour
 {
@@ -7,32 +8,58 @@ public class LobbyNetworkManager : MonoBehaviour
     [SerializeField] private LobbyCustomization customizationController;
     [SerializeField] private LobbyStartController startController;
 
-    private int myPlayerSlot = 0; // Guardará nuestro slot local
+    [Header("UI Info Red")]
+    [SerializeField] private TextMeshProUGUI roomIPText; // Arrastra un texto TMP en el Lobby
 
-    // --- PROPIEDAD PÚBLICA PARA CONSULTAR DESDE GAMEMANAGER ---
-    public int MySlot => myPlayerSlot;
+    [Header("Conexión (opcional)")]
+    [SerializeField] private string serverIP = "";
+
+    public int MySlot => GameSession.MySlot;
 
     private void Awake()
     {
-        if (Instance == null)
-        {
-            Instance = this;
-            DontDestroyOnLoad(gameObject); // Para mantener el estado al cambiar a la escena de juego
-        }
-        else
-        {
-            Destroy(gameObject);
-        }
+        Instance = this;
     }
 
-    public void OnPlayerListUpdated(int totalPlayers, bool isHost, int mySlot)
+    private void OnDestroy()
     {
-        myPlayerSlot = mySlot; // Guardamos la asignación
+        if (Instance == this) Instance = null;
+    }
+
+    private void Start()
+    {
+        if (SocketClient.Instance == null)
+            new GameObject("SocketClient").AddComponent<SocketClient>();
+
+        if (!string.IsNullOrWhiteSpace(serverIP))
+            SocketClient.Instance.serverIP = serverIP.Trim();
+
+        // Mostrar la IP en pantalla para que los demás la copien
+        if (roomIPText != null)
+        {
+            string myIP = IPManager.GetLocalIPAddress();
+            roomIPText.text = "IP SALA: " + myIP;
+        }
+
+        if (!SocketClient.Instance.IsConnected)
+            SocketClient.Instance.ConnectToServer();
+
+        SocketClient.Instance.SendMessageToServer("LOBBY_REFRESH", new object());
+    }
+
+    // occupiedSlots: slots realmente ocupados (puede venir null con servidores viejos)
+    public void OnPlayerListUpdated(int totalPlayers, bool isHost, int mySlot, int[] occupiedSlots = null)
+    {
+        GameSession.MySlot = mySlot; // Guardamos la asignación
 
         if (customizationController != null)
         {
             customizationController.SetLocalPlayerSlot(mySlot);
-            customizationController.UpdateConnectedPlayers(totalPlayers);
+
+            if (occupiedSlots != null && occupiedSlots.Length > 0)
+                customizationController.UpdateConnectedPlayers(occupiedSlots);
+            else
+                customizationController.UpdateConnectedPlayers(totalPlayers);
         }
 
         if (startController != null)
@@ -57,5 +84,15 @@ public class LobbyNetworkManager : MonoBehaviour
     public void OnStartGamePressed()
     {
         SocketClient.Instance?.SendMessageToServer("START_GAME", new object());
+    }
+
+    // Conéctalo al botón Home (además de SceneLoader.LoadMainMenu) para liberar tu lugar en el servidor
+    public void LeaveLobby()
+    {
+        // 1. Desconecta el socket para liberar el slot en el servidor
+        SocketClient.Instance?.Disconnect();
+
+        // 2. Carga la escena del menú principal
+        UnityEngine.SceneManagement.SceneManager.LoadScene("MainMenu");
     }
 }

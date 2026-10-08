@@ -7,6 +7,10 @@ public class PlayerController : MonoBehaviour
     [Header("Movimiento")]
     [SerializeField] private float moveSpeed = 8f;
 
+    [Header("Límites del mapa")]
+    [SerializeField] private float mapHalfSize = 50f; // el mapa mide 100x100, así que va de -50 a 50
+    [SerializeField] private float edgeMargin = 3f;   // el pollo se detiene un poco antes del borde
+
     [Header("Identificación de Red")]
     public int playerSlot = 0;
     public bool isLocalPlayer = true;
@@ -29,6 +33,8 @@ public class PlayerController : MonoBehaviour
     {
         if (!isLocalPlayer) return;
 
+        ClampToMap();
+
         if (isFrozen)
         {
             rb.linearVelocity = Vector2.zero;
@@ -45,6 +51,15 @@ public class PlayerController : MonoBehaviour
         }
 
         rb.linearVelocity = input * (moveSpeed * speedMultiplier);
+    }
+
+    // Mantiene al pollo dentro del mapa por código, sin depender de colliders en los bordes
+    private void ClampToMap()
+    {
+        float limit = mapHalfSize - edgeMargin;
+        Vector2 p = rb.position;
+        Vector2 clamped = new Vector2(Mathf.Clamp(p.x, -limit, limit), Mathf.Clamp(p.y, -limit, limit));
+        if (clamped != p) rb.position = clamped;
     }
 
     // Maíz Arcoíris (Turbo)

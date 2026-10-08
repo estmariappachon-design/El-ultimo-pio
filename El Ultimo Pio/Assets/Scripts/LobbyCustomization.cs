@@ -14,9 +14,9 @@ public class LobbyCustomization : MonoBehaviour
     [SerializeField] private Button[] editButtons;     // Los 4 botones de Lápiz
     [SerializeField] private Button[] confirmButtons;  // Los 4 botones de Chulo (✔)
 
-    private int localPlayerSlot = 0;   // Slot de este jugador local (0 = Nido 1, 1 = Nido 2, etc.)
-    private int confirmedChicken = 0;  // Pollo guardado del jugador local
-    private int tempChicken = 0;       // Selección temporal mientras la paleta esté abierta
+    private int localPlayerSlot = 0;   // Slot de este jugador
+    private int confirmedChicken = 0;  // Pollo guardado
+    private int tempChicken = 0;       // Selección temporal
 
     private void Awake()
     {
@@ -26,107 +26,139 @@ public class LobbyCustomization : MonoBehaviour
 
     private void Start()
     {
-        // Al iniciar, probamos simular que solo hay 1 jugador (nosotros en el Slot 0)
         UpdateConnectedPlayers(1);
-    }
-
-    // --- MANEJO DE NIDOS OCUPADOS/VACÍOS ---
-    public void UpdateConnectedPlayers(int activePlayerCount)
-    {
-        for (int i = 0; i < chickenPreviews.Length; i++)
-        {
-            bool isSlotOccupied = i < activePlayerCount;
-            bool isMySlot = (i == localPlayerSlot) && isSlotOccupied;
-
-            // 1. Mostrar u ocultar la imagen del pollo
-            if (chickenPreviews[i] != null)
-            {
-                chickenPreviews[i].gameObject.SetActive(isSlotOccupied);
-            }
-
-            // 2. El Lápiz SOLO se activa para TU propio nido
-            if (editButtons != null && i < editButtons.Length && editButtons[i] != null)
-            {
-                editButtons[i].gameObject.SetActive(isMySlot);
-            }
-
-            // 3. El Chulo (✔) SOLO se activa para TU propio nido
-            if (confirmButtons != null && i < confirmButtons.Length && confirmButtons[i] != null)
-            {
-                confirmButtons[i].gameObject.SetActive(isMySlot);
-            }
-        }
     }
 
     public void SetLocalPlayerSlot(int slot)
     {
         localPlayerSlot = Mathf.Clamp(slot, 0, chickenPreviews.Length - 1);
-        Debug.Log("Mi slot asignado es: " + localPlayerSlot);
+        Debug.Log("Mi slot asignado en LobbyCustomization es: " + localPlayerSlot);
     }
 
-    // --- ABRIR PALETA (LÁPIZ DE TU NIDO) ---
+    public void UpdateConnectedPlayers(int activePlayerCount)
+    {
+        int[] slots = new int[Mathf.Max(0, activePlayerCount)];
+        for (int i = 0; i < slots.Length; i++) slots[i] = i;
+        UpdateConnectedPlayers(slots);
+    }
+
+    public void UpdateConnectedPlayers(int[] occupiedSlots)
+    {
+        if (chickenPreviews == null || occupiedSlots == null) return;
+
+        for (int i = 0; i < chickenPreviews.Length; i++)
+        {
+            bool isSlotOccupied = System.Array.IndexOf(occupiedSlots, i) >= 0;
+            bool isMySlot = (i == localPlayerSlot) && isSlotOccupied;
+
+            if (chickenPreviews[i] != null)
+                chickenPreviews[i].gameObject.SetActive(isSlotOccupied);
+
+            if (editButtons != null && i < editButtons.Length && editButtons[i] != null)
+                editButtons[i].gameObject.SetActive(isMySlot);
+
+            if (confirmButtons != null && i < confirmButtons.Length && confirmButtons[i] != null)
+                confirmButtons[i].gameObject.SetActive(isMySlot);
+        }
+    }
+
+    // --- ABRIR PALETA DE OPCIONES ---
     public void OpenOptionsForSlot(int slotIndex)
     {
-        // Doble validación: solo puedes abrir la paleta de tu propio nido
         if (slotIndex == localPlayerSlot)
         {
             tempChicken = confirmedChicken;
+
+            // Reposiciona la ventana sobre el nido actual
+            if (chickenPreviews != null && slotIndex < chickenPreviews.Length && chickenPreviews[slotIndex] != null)
+            {
+                Vector3 nestPos = chickenPreviews[slotIndex].transform.position;
+                chickenOptionsPanel.transform.position = new Vector3(nestPos.x, chickenOptionsPanel.transform.position.y, nestPos.z);
+            }
+
             chickenOptionsPanel.SetActive(true);
         }
     }
 
-    // --- SELECCIONAR HUEVO DE LA PALETA ---
+    // --- SELECCIONAR HUEVO/COLOR DE LA PALETA ---
     public void SelectChicken(int chickenIndex)
     {
-        if (chickenIndex < 0 || chickenIndex >= chickenSprites.Length)
+        if (chickenSprites == null || chickenIndex < 0 || chickenIndex >= chickenSprites.Length)
             return;
 
         tempChicken = chickenIndex;
-        UpdatePreviewSprite(tempChicken);
+
+        // Muestra la vista previa del nido local
+        if (chickenPreviews != null && localPlayerSlot < chickenPreviews.Length && chickenPreviews[localPlayerSlot] != null)
+        {
+            chickenPreviews[localPlayerSlot].sprite = chickenSprites[tempChicken];
+        }
     }
 
+    // --- CONFIRMAR SELECCIÓN (BOTÓN CHULO ✔) ---
+    // En LobbyCustomization.cs
     public void ConfirmSelection()
     {
         confirmedChicken = tempChicken;
-        UpdatePreviewSprite(confirmedChicken);
+
+        // Guardar localmente
+        SaveChickenToSession(localPlayerSlot, confirmedChicken);
+
+        // Actualizar el sprite local
+        if (chickenPreviews != null && localPlayerSlot < chickenPreviews.Length)
+            chickenPreviews[localPlayerSlot].sprite = chickenSprites[confirmedChicken];
 
         if (chickenOptionsPanel != null)
             chickenOptionsPanel.SetActive(false);
 
-        Debug.Log("Jugador " + localPlayerSlot + " guardó el pollo " + (confirmedChicken + 1));
-
-        // Notificamos a la red que cambiamos nuestro pollo
-        // Ej: networkManager.SendChickenSelection(localPlayerSlot, confirmedChicken);
+        // AVISAR AL SERVIDO ENVIANDO EL SLOT ASIGNADO
+        LobbyNetworkManager.Instance?.SendChickenChoice(localPlayerSlot, confirmedChicken);
     }
 
-    // --- CANCELAR SELECCIÓN (X) ---
+    // --- CANCELAR SELECCIÓN (BOTÓN X) ---
     public void CancelSelection()
     {
-        UpdatePreviewSprite(confirmedChicken);
+        if (chickenPreviews != null && localPlayerSlot < chickenPreviews.Length && chickenPreviews[localPlayerSlot] != null)
+        {
+            if (confirmedChicken >= 0 && confirmedChicken < chickenSprites.Length)
+                chickenPreviews[localPlayerSlot].sprite = chickenSprites[confirmedChicken];
+        }
 
         if (chickenOptionsPanel != null)
             chickenOptionsPanel.SetActive(false);
     }
 
-    private void UpdatePreviewSprite(int spriteIndex)
-    {
-        if (chickenPreviews == null || localPlayerSlot >= chickenPreviews.Length)
-            return;
-
-        if (spriteIndex >= 0 && spriteIndex < chickenSprites.Length)
-        {
-            chickenPreviews[localPlayerSlot].sprite = chickenSprites[spriteIndex];
-        }
-    }
-    // Cambia la imagen del nido de cualquier jugador cuando el servidor envía la actualización
+    // --- RECIBIR EL POLLO DE OTRO JUGADOR DESDE LA RED ---
     public void SetRemotePlayerChicken(int targetSlot, int chickenIndex)
     {
+        // Guardar la elección remota en la sesión
+        SaveChickenToSession(targetSlot, chickenIndex);
+
         if (chickenPreviews == null || targetSlot < 0 || targetSlot >= chickenPreviews.Length)
             return;
 
-        if (chickenIndex >= 0 && chickenIndex < chickenSprites.Length)
+        if (chickenSprites != null && chickenIndex >= 0 && chickenIndex < chickenSprites.Length)
         {
-            chickenPreviews[targetSlot].sprite = chickenSprites[chickenIndex];
+            if (chickenPreviews[targetSlot] != null)
+                chickenPreviews[targetSlot].sprite = chickenSprites[chickenIndex];
+        }
+    }
+
+    private void SaveChickenToSession(int slot, int chickenIndex)
+    {
+        if (GameSession.Slots == null || GameSession.Chickens == null || GameSession.Slots.Length == 0)
+        {
+            GameSession.Slots = new int[] { 0, 1, 2, 3 };
+            GameSession.Chickens = new int[] { 0, 0, 0, 0 };
+        }
+
+        for (int i = 0; i < GameSession.Slots.Length; i++)
+        {
+            if (GameSession.Slots[i] == slot)
+            {
+                GameSession.Chickens[i] = chickenIndex;
+                break;
+            }
         }
     }
 }

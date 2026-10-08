@@ -3,24 +3,31 @@ using UnityEngine.UI;
 
 public class LobbyStartController : MonoBehaviour
 {
-    [SerializeField] private Button startButton;
+    [SerializeField] private Button startButton; // El botón EMPEZAR (BtnEmpezar)
 
     private bool isHost = false;
     private int playerCount = 1;
 
     private void Start()
     {
+        if (startButton != null)
+        {
+            // El clic se conecta por código, no hace falta ponerlo en el OnClick del Inspector
+            startButton.onClick.RemoveListener(OnStartButtonClicked);
+            startButton.onClick.AddListener(OnStartButtonClicked);
+        }
+
         UpdateStartButton();
     }
 
-    // Llama a esto cuando el jugador se conecte y el servidor determine si es Host
+    // Lo llama LobbyNetworkManager cuando el servidor dice si este jugador es Host
     public void SetHost(bool value)
     {
         isHost = value;
         UpdateStartButton();
     }
 
-    // Llama a esto cuando ingrese o salga alguien del lobby
+    // Lo llama LobbyNetworkManager cuando entra o sale alguien del lobby
     public void SetPlayerCount(int count)
     {
         playerCount = count;
@@ -35,10 +42,13 @@ public class LobbyStartController : MonoBehaviour
         startButton.interactable = isHost && playerCount >= 2;
     }
 
-    // Método para conectar al evento OnClick del botón EMPERZAR
     public void OnStartButtonClicked()
     {
+        if (!isHost || playerCount < 2) return;
+
         Debug.Log("¡Iniciando partida!");
-        // Aquí cargas la escena de juego, ej: SceneManager.LoadScene("Game");
+
+        // Le pide al servidor que inicie: el servidor avisa a TODOS y cada uno carga la escena de juego
+        LobbyNetworkManager.Instance?.OnStartGamePressed();
     }
 }
