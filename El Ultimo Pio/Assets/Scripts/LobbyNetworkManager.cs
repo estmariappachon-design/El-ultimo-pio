@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using TMPro;
 
 public class LobbyNetworkManager : MonoBehaviour
@@ -9,12 +10,12 @@ public class LobbyNetworkManager : MonoBehaviour
     [SerializeField] private LobbyStartController startController;
 
     [Header("UI Info Red")]
-    [SerializeField] private TextMeshProUGUI roomIPText; // Arrastra un texto TMP en el Lobby
+    [SerializeField] private TextMeshProUGUI roomIPText; // Text_IP_Sala
 
-    [Header("Conexión (opcional)")]
-    [SerializeField] private string serverIP = "";
+    [Header("Escenas")]
+    [SerializeField] private string mainMenuSceneName = "MainMenu";
 
-    public int MySlot => GameSession.MySlot;
+    private int playerCount = 1;
 
     private void Awake()
     {
@@ -28,29 +29,35 @@ public class LobbyNetworkManager : MonoBehaviour
 
     private void Start()
     {
-        if (SocketClient.Instance == null)
-            new GameObject("SocketClient").AddComponent<SocketClient>();
-
-        if (!string.IsNullOrWhiteSpace(serverIP))
-            SocketClient.Instance.serverIP = serverIP.Trim();
-
-        // Mostrar la IP en pantalla para que los demás la copien
-        if (roomIPText != null)
+        // Se llega al lobby SIEMPRE desde el menÃº (ya conectado) o volviendo de una partida
+        if (SocketClient.Instance == null || !SocketClient.Instance.IsConnected)
         {
-            string myIP = IPManager.GetLocalIPAddress();
-            roomIPText.text = "IP SALA: " + myIP;
+            GameSession.LastError = "No hay conexiÃ³n con la sala. Vuelve a crearla o a unirte.";
+            SceneManager.LoadScene(mainMenuSceneName);
+            return;
         }
 
-        if (!SocketClient.Instance.IsConnected)
-            SocketClient.Instance.ConnectToServer();
-
-        SocketClient.Instance.SendMessageToServer("LOBBY_REFRESH", new object());
+        RefreshRoomText();
+        SocketClient.Instance.SendMessageToServer("LOBBY_REFRESH", new EmptyPayload());
     }
 
-    // occupiedSlots: slots realmente ocupados (puede venir null con servidores viejos)
-    public void OnPlayerListUpdated(int totalPlayers, bool isHost, int mySlot, int[] occupiedSlots = null)
+    private void RefreshRoomText()
     {
-        GameSession.MySlot = mySlot; // Guardamos la asignación
+        if (roomIPText == null) return;
+
+        string count = "Jugadores: " + playerCount + "/" + GameServer.MaxPlayers;
+
+        if (GameServer.IsRunning)
+            roomIPText.text = "IP DE LA SALA: " + IPManager.GetLocalIPAddress() + "\n" + count;
+        else
+            roomIPText.text = "Conectado a: " + SocketClient.Instance.serverIP + "\n" + count;
+    }
+
+    // occupiedSlots: slots realmente ocupados
+    public void OnPlayerListUpdated(int totalPlayers, bool isHost, int mySlot, int[] occupiedSlots)
+    {
+        GameSession.MySlot = mySlot;
+        playerCount = totalPlayers;
 
         if (customizationController != null)
         {
@@ -67,6 +74,8 @@ public class LobbyNetworkManager : MonoBehaviour
             startController.SetHost(isHost);
             startController.SetPlayerCount(totalPlayers);
         }
+
+        RefreshRoomText();
     }
 
     public void OnPlayerChangedChicken(int slot, int chickenIndex)
@@ -81,18 +90,18 @@ public class LobbyNetworkManager : MonoBehaviour
         SocketClient.Instance?.SendMessageToServer("SET_CHICKEN", payload);
     }
 
+    // Conectado al OnClick de BtnEmpezar
     public void OnStartGamePressed()
     {
-        SocketClient.Instance?.SendMessageToServer("START_GAME", new object());
+        if (startController != null && !startController.CanStart) return;
+        SocketClient.Instance?.SendMessageToServer("START_GAME", new EmptyPayload());
     }
 
-    // Conéctalo al botón Home (además de SceneLoader.LoadMainMenu) para liberar tu lugar en el servidor
+    // Conectado al botÃ³n Home
     public void LeaveLobby()
     {
-        // 1. Desconecta el socket para liberar el slot en el servidor
         SocketClient.Instance?.Disconnect();
-
-        // 2. Carga la escena del menú principal
-        UnityEngine.SceneManagement.SceneManager.LoadScene("MainMenu");
+        if (GameServer.IsRunning) GameServer.StopServer(); // si era el anfitriÃ³n, cierra la sala
+        SceneManager.LoadScene(mainMenuSceneName);
     }
 }

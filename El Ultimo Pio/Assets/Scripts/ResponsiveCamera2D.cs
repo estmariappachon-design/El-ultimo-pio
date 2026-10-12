@@ -3,7 +3,7 @@ using UnityEngine;
 [RequireComponent(typeof(Camera))]
 public class ResponsiveCamera2D : MonoBehaviour
 {
-    [Header("Tamaño del Terreno")]
+    [Header("TamaÃ±o del Terreno")]
     public float mapWidth = 100f;
     public float mapHeight = 100f;
 
@@ -20,12 +20,12 @@ public class ResponsiveCamera2D : MonoBehaviour
 
         if (screenAspect >= targetAspect)
         {
-            // La pantalla es más ancha que el mapa: ajustamos basándonos en la altura
+            // La pantalla es mÃ¡s ancha que el mapa: ajustamos basÃ¡ndonos en la altura
             cam.orthographicSize = mapHeight / 2f;
         }
         else
         {
-            // La pantalla es más angosta: ajustamos basándonos en el ancho para no recortar nada
+            // La pantalla es mÃ¡s angosta: ajustamos basÃ¡ndonos en el ancho para no recortar nada
             float differenceInSize = targetAspect / screenAspect;
             cam.orthographicSize = (mapHeight / 2f) * differenceInSize;
         }

@@ -1,75 +1,105 @@
 using System.Collections.Generic;
 using System.Text;
-using UnityEngine;
-using UnityEngine.UI;
 using TMPro;
+using UnityEngine;
+using UnityEngine.SceneManagement;
+using UnityEngine.UI;
 
+// =====================================================================================
+//  GAME MANAGER (escena Gameplay)
+//  - Crea los 50 maÃ­ces y coloca a cada pollo en su posiciÃ³n aleatoria (datos del servidor)
+//  - EnvÃ­a la posiciÃ³n del pollo local y mueve a los pollos remotos
+//  - Pide al servidor recoger maÃ­ces y usar power-ups; el servidor decide y responde
+//  - Mantiene el HUD: tiempo, puntaje, maÃ­ces, ranking, cargas de power-ups y estado
+//  - Muestra la pantalla de resultados con ganador / empate
+// =====================================================================================
 public class GameManager : MonoBehaviour
 {
     public static GameManager Instance;
 
-    private const int TotalItems = 50;
-    private const float OfflineGameTime = 120f;
-
-    [Header("Prefabs de Maíces")]
+    [Header("Prefabs de MaÃ­ces")]
     [SerializeField] private GameObject maizNormalPrefab;
     [SerializeField] private GameObject maizVelocidadPrefab;
     [SerializeField] private GameObject maizCongelarPrefab;
 
-    [Header("UI Gameplay")]
+    [Header("UI Gameplay (los opcionales se crean solos si se dejan vacÃ­os)")]
     [SerializeField] private TextMeshProUGUI timerText;
     [SerializeField] private TextMeshProUGUI scoreText;
+    [Tooltip("{0} = puntos, {1} = maÃ­ces recogidos")]
+    [SerializeField] private string scoreFormat = "{0} pts  |  {1} maÃ­ces";
+    [SerializeField] private TextMeshProUGUI rankingText;   // opcional (arriba a la derecha)
+    [SerializeField] private TextMeshProUGUI statusText;    // opcional (centro, debajo del tiempo)
 
     [Header("Botones de Power-Up")]
     [SerializeField] private Button btnTurbo;
     [SerializeField] private Button btnCongelar;
-    [SerializeField] private Color buttonOnColor = Color.white;                            // botón con power-up
-    [SerializeField] private Color buttonOffColor = new Color(0.35f, 0.35f, 0.35f, 0.5f);  // botón sin power-up
-
-    [Header("Turbo")]
-    [SerializeField] private float turboDuration = 5f;
-
-    [Header("Hielo")]
-    [SerializeField] private float freezeDuration = 4f;    // segundos que quedan congelados los rivales
-    [SerializeField] private int freezeBonusPoints = 2;    // puntos EXTRA que gana quien activa el hielo
-    [SerializeField] private int freezePenaltyPoints = 2;  // puntos que pierden los rivales
+    [SerializeField] private Color buttonOnColor = Color.white;
+    [SerializeField] private Color buttonOffColor = new Color(0.35f, 0.35f, 0.35f, 0.5f);
 
     [Header("Pollos (MISMO ORDEN que en el lobby)")]
     [SerializeField] private Sprite[] chickenSprites;
-
-    [Header("Escenas")]
-    [SerializeField] private string lobbySceneName = "Lobby";
-
-    [Header("Multijugador")]
-    [SerializeField] private Vector2[] startPositions =
-    {
-        new Vector2(-6f, -6f), new Vector2(6f, -6f), new Vector2(-6f, 6f), new Vector2(6f, 6f)
-    };
     [SerializeField] private Color[] playerColors =
     {
         Color.yellow, Color.cyan, Color.green, new Color(1f, 0.5f, 0f)
-    }; // Solo se usan si no hay sprites de pollos asignados
+    }; // solo se usan si no hay sprite asignado
+    [SerializeField] private float nameLabelHeight = 4f;
 
+    [Header("Escenas")]
+    [SerializeField] private string lobbySceneName = "Lobby";
+    [SerializeField] private string mainMenuSceneName = "MainMenu";
+
+    [Header("Sonidos (opcionales)")]
+    [SerializeField] private AudioClip pickupClip;   // maÃ­z normal
+    [SerializeField] private AudioClip specialClip;  // maÃ­z especial
+    [SerializeField] private AudioClip turboClip;    // activar turbo
+    [SerializeField] private AudioClip freezeClip;   // lanzar hielo
+    [SerializeField] private AudioClip frozenClip;   // me congelaron
+    [SerializeField] private AudioClip endClip;      // fin de partida
+
+    // ---------- Estado ----------
     private int myScore = 0;
+    private int myItems = 0;
     private int turboCharges = 0;
     private int freezeCharges = 0;
-    private float gameTime = OfflineGameTime;
+    private float gameTime;
     private bool gameActive = false;
     private bool gameOverHandled = false;
+    private float nextPowerUpRequest = 0f;
+    private float statusUntil = 0f;
 
     private PlayerController localPlayer;
+    private AudioSource audioSource;
+    private TextMeshProUGUI turboBadge;
+    private TextMeshProUGUI freezeBadge;
+
     private readonly Dictionary<int, CollectibleItem> items = new Dictionary<int, CollectibleItem>();
     private readonly Dictionary<int, RemotePlayer> remotePlayers = new Dictionary<int, RemotePlayer>();
+    private readonly Dictionary<int, int> scoresBySlot = new Dictionary<int, int>();
+    private readonly Dictionary<int, int> itemsBySlot = new Dictionary<int, int>();
+
     private float moveSendTimer = 0f;
     private Vector2 lastSentPos;
 
-    // En línea = hay un servidor conectado. Si no, se juega en modo local (solo tú).
     private bool IsOnline => SocketClient.Instance != null && SocketClient.Instance.IsConnected;
+    private int MySlot => GameSession.MySlot;
+
+    // =================================================================================
+    //  Inicio
+    // =================================================================================
 
     private void Awake()
     {
-        if (Instance == null) Instance = this;
-        else Destroy(gameObject);
+        if (Instance != null && Instance != this)
+        {
+            Destroy(gameObject);
+            return;
+        }
+        Instance = this;
+    }
+
+    private void OnDestroy()
+    {
+        if (Instance == this) Instance = null;
     }
 
     private void Start()
@@ -77,191 +107,105 @@ public class GameManager : MonoBehaviour
         if (btnTurbo != null) btnTurbo.onClick.AddListener(ActivateTurbo);
         if (btnCongelar != null) btnCongelar.onClick.AddListener(ActivateFreeze);
 
+        audioSource = GetComponent<AudioSource>();
+        if (audioSource == null) audioSource = gameObject.AddComponent<AudioSource>();
+        audioSource.playOnAwake = false;
+
+        EnsureHud();
+
         localPlayer = FindLocalPlayer();
         if (localPlayer == null)
         {
-            Debug.LogError("[GM] No encontré el pollo local (un PlayerController con Is Local Player activo) en la escena.");
+            Debug.LogError("[GM] No hay un PlayerController con 'Is Local Player' activo en la escena.");
+            return;
         }
-        else
+
+        if (!IsOnline || !GameSession.HasMatch)
         {
-            localPlayer.playerSlot = GetMySlot();
-
-            Vector2 start = StartPosition(GetMySlot());
-            localPlayer.transform.position = new Vector3(start.x, start.y, 0f);
-            lastSentPos = start;
-
-            // APLICAR SKIN AL JUGADOR LOCAL:
-            ApplySkin(localPlayer.gameObject, GetMySlot(), false);
+            // Se le dio Play directamente a la escena Gameplay: hay que entrar desde el menÃº
+            SetLocalPlayerLocked(true);
+            ShowStatus("Sin conexiÃ³n. Inicia la partida desde el MenÃº.", 10f, Color.red);
+            Invoke(nameof(GoToMainMenu), 3f);
+            return;
         }
 
-        UpdateScoreUI();
-        RefreshPowerUpButtons();
+        // ----- Pollo local -----
+        ChickenAnimator myAnim = EnsureAnimator(localPlayer.gameObject);
+        localPlayer.SetAnimator(myAnim);
+        localPlayer.playerSlot = MySlot;
+
+        Vector2 start = GameSession.SpawnOf(MySlot);
+        localPlayer.transform.position = new Vector3(start.x, start.y, 0f);
+        Rigidbody2D rb = localPlayer.GetComponent<Rigidbody2D>();
+        if (rb != null) rb.position = start;
+        lastSentPos = start;
+
+        ApplySkin(localPlayer.gameObject, MySlot, false);
+
+        // ----- Mundo -----
         SpawnAllItems();
         IgnoreSolidColliders();
         SpawnRemotePlayers();
+        CreateNameLabel(localPlayer.gameObject, "TÃš", new Color(1f, 0.85f, 0.2f));
 
-        string slotsInfo = GameSession.Slots == null ? "ninguno" : string.Join(",", GameSession.Slots);
-        Debug.Log("[GM] enLinea=" + IsOnline + " | miSlot=" + GetMySlot() +
-                  " | slotsEnPartida=" + slotsInfo +
-                  " | spritesAsignados=" + (chickenSprites == null ? 0 : chickenSprites.Length) +
-                  " | pollosRemotos=" + remotePlayers.Count);
-        Invoke(nameof(LogPlayerPosition), 3f);
-
-        if (IsOnline)
+        foreach (int slot in GameSession.Slots)
         {
-            // En línea: todos esperan quieto hasta que el servidor diga "ya" (GAME_BEGIN)
-            SetLocalPlayerLocked(true);
-            if (timerText != null) timerText.text = "Esperando jugadores...";
-
-            SocketClient.Instance.SendMessageToServer("GAME_READY", new object());
-
-            // Si el servidor ya había dicho "ya" mientras cargaba la escena
-            if (GameSession.BeginPending)
-            {
-                GameSession.BeginPending = false;
-                OnGameBegin(GameSession.BeginDuration);
-            }
+            scoresBySlot[slot] = 0;
+            itemsBySlot[slot] = 0;
         }
-        else
+
+        gameTime = GameSession.Duration;
+        UpdateScoreUI();
+        UpdateRanking();
+        RefreshPowerUpButtons();
+
+        // Todos esperan quietos hasta que el servidor diga "ya" (GAME_BEGIN)
+        SetLocalPlayerLocked(true);
+        if (timerText != null) timerText.text = "Esperando...";
+        ShowStatus("Esperando a los demÃ¡s jugadores...", 30f, Color.white);
+
+        SocketClient.Instance.SendMessageToServer("GAME_READY", new EmptyPayload());
+
+        if (GameSession.BeginPending)
         {
-            gameActive = true; // Modo local: arranca de inmediato
+            GameSession.BeginPending = false;
+            OnGameBegin(GameSession.BeginDuration);
         }
     }
 
-    // CÓDIGO CON FORMATO MINUTOS Y SEGUNDOS:
     private void Update()
     {
+        UpdateStatusText();
+
         if (!gameActive) return;
 
-        gameTime -= Time.deltaTime;
+        gameTime = Mathf.Max(0f, gameTime - Time.deltaTime);
 
         if (timerText != null)
         {
-            int totalSeconds = Mathf.Max(0, Mathf.CeilToInt(gameTime));
-            int minutes = totalSeconds / 60; // Calcula los minutos
-            int seconds = totalSeconds % 60; // Calcula los segundos restantes
-
-            // El formato D2 fuerza a que los segundos siempre tengan 2 dígitos (ej. 02 en vez de 2)
-            timerText.text = string.Format("{0}:{1:D2}", minutes, seconds);
+            int totalSeconds = Mathf.CeilToInt(gameTime);
+            timerText.text = string.Format("{0}:{1:D2}", totalSeconds / 60, totalSeconds % 60);
+            timerText.color = totalSeconds <= 10 ? new Color(1f, 0.3f, 0.3f) : Color.white;
         }
 
-        if (gameTime <= 0f)
-        {
-            gameTime = 0f;
-            if (!IsOnline) OnGameOver();
-        }
-
+        // El final lo decide el servidor (GAME_OVER); aquÃ­ solo se muestra el reloj
         SendMyPosition();
     }
 
-    // ---------- Utilidades ----------
+    // =================================================================================
+    //  Inicio y final (llamados por SocketClient)
+    // =================================================================================
 
-    private void UpdateScoreUI()
-    {
-        if (scoreText != null)
-            scoreText.text = string.Format("{0}/{1}", myScore, TotalItems);
-    }
-
-    private int GetMySlot()
-    {
-        return GameSession.MySlot;
-    }
-
-    private Vector2 StartPosition(int slot)
-    {
-        if (startPositions == null || startPositions.Length == 0) return Vector2.zero;
-        return startPositions[Mathf.Abs(slot) % startPositions.Length];
-    }
-
-    private PlayerController FindLocalPlayer()
-    {
-        PlayerController[] players = FindObjectsByType<PlayerController>(FindObjectsInactive.Exclude);
-        foreach (var p in players)
-            if (p.isLocalPlayer) return p;
-        return null;
-    }
-
-    // El pollo solo debe recoger maíces (que son triggers): no puede chocar con el terreno ni con nada sólido.
-    // Si el terreno tiene un collider sólido, empujaba al pollo fuera del mapa y por eso "desaparecía".
-    private void IgnoreSolidColliders()
-    {
-        if (localPlayer == null) return;
-
-        Collider2D myCollider = localPlayer.GetComponent<Collider2D>();
-        if (myCollider == null) return;
-
-        List<string> ignored = new List<string>();
-        Collider2D[] all = FindObjectsByType<Collider2D>(FindObjectsInactive.Exclude);
-        foreach (Collider2D other in all)
-        {
-            if (other == myCollider || other.isTrigger) continue;
-            Physics2D.IgnoreCollision(myCollider, other);
-            ignored.Add(other.gameObject.name);
-        }
-
-        Debug.Log("[GM] Colliders sólidos que el pollo ignora: " + ignored.Count +
-                  (ignored.Count > 0 ? " (" + string.Join(", ", ignored) + ")" : ""));
-    }
-
-    private void LogPlayerPosition()
-    {
-        if (localPlayer == null) return;
-
-        SpriteRenderer sr = localPlayer.GetComponent<SpriteRenderer>();
-        Debug.Log("[GM] Posición del pollo a los 3 s: " + localPlayer.transform.position +
-                  " | sprite=" + (sr != null && sr.sprite != null ? sr.sprite.name : "NINGUNO") +
-                  " | visible=" + (sr != null && sr.enabled));
-    }
-
-    // Bloquea o libera el movimiento del pollo local (antes de empezar y al terminar)
-    private void SetLocalPlayerLocked(bool locked)
-    {
-        if (localPlayer == null) return;
-
-        localPlayer.enabled = !locked;
-        if (locked)
-        {
-            Rigidbody2D rb = localPlayer.GetComponent<Rigidbody2D>();
-            if (rb != null) rb.linearVelocity = Vector2.zero;
-        }
-    }
-
-    // Pone el sprite del pollo que ese jugador eligió en el lobby
-    private void ApplySkin(GameObject pollo, int slot, bool tintIfNoSprite)
-    {
-        SpriteRenderer sr = pollo.GetComponent<SpriteRenderer>();
-        if (sr == null) return;
-
-        // Los pollos siempre se dibujan por encima del terreno y de los maíces
-        sr.enabled = true;
-        sr.sortingOrder = 100;
-
-        // Lee el pollo guardado desde la GameSession
-        int idx = GameSession.ChickenOf(slot);
-        bool hasSprite = chickenSprites != null && idx >= 0 && idx < chickenSprites.Length && chickenSprites[idx] != null;
-
-        if (hasSprite)
-        {
-            sr.sprite = chickenSprites[idx];
-            sr.color = Color.white; // Mantiene los colores originales del Sprite sin tinte
-        }
-        else if (tintIfNoSprite && playerColors != null && playerColors.Length > 0)
-        {
-            sr.color = playerColors[Mathf.Abs(slot) % playerColors.Length];
-        }
-    }
-
-    // ---------- Inicio y final de la partida ----------
-
-    // El servidor avisa que todos están listos: empieza el reloj para todos a la vez
     public void OnGameBegin(float duration)
     {
-        gameTime = duration > 0f ? duration : OfflineGameTime;
+        if (gameOverHandled) return;
+
+        gameTime = duration > 0f ? duration : GameSession.Duration;
         gameActive = true;
         SetLocalPlayerLocked(false);
+        ShowStatus("Â¡A recolectar!", 1.5f, new Color(1f, 0.85f, 0.2f));
     }
 
-    // Se acabó el tiempo (lo llama el servidor en línea, o el reloj local en modo local)
     public void OnGameOver()
     {
         if (gameOverHandled) return;
@@ -269,302 +213,242 @@ public class GameManager : MonoBehaviour
 
         gameActive = false;
         SetLocalPlayerLocked(true);
-        if (timerText != null) timerText.text = "FIN DEL JUEGO";
-
-        if (IsOnline)
-        {
-            // Mandamos nuestro puntaje; el servidor reúne los de todos y responde con RESULTS
-            ScorePayload payload = new ScorePayload { playerSlot = GetMySlot(), score = myScore };
-            SocketClient.Instance.SendMessageToServer("FINAL_SCORE", payload);
-        }
-        else
-        {
-            ShowResults(new[] { GetMySlot() }, new[] { myScore });
-        }
+        if (timerText != null) timerText.text = "0:00";
+        ShowStatus("Â¡TIEMPO!", 5f, new Color(1f, 0.3f, 0.3f));
+        Play(endClip);
     }
 
-    public void OnResults(int[] slots, int[] scores)
+    public void OnResults(ResultsPayload r)
     {
-        if (slots == null || scores == null) return;
-        ShowResults(slots, scores);
+        if (r == null || r.slots == null) return;
+        if (!gameOverHandled) OnGameOver();
+        BuildResultsPanel(r);
     }
 
-    private void ShowResults(int[] slots, int[] scores)
-    {
-        List<KeyValuePair<int, int>> ranking = new List<KeyValuePair<int, int>>();
-        for (int i = 0; i < slots.Length && i < scores.Length; i++)
-            ranking.Add(new KeyValuePair<int, int>(slots[i], scores[i]));
-        ranking.Sort((a, b) => b.Value.CompareTo(a.Value));
+    // =================================================================================
+    //  MaÃ­ces
+    // =================================================================================
 
-        StringBuilder sb = new StringBuilder("FIN DEL JUEGO\n\n");
-        for (int i = 0; i < ranking.Count; i++)
-        {
-            string you = ranking[i].Key == GetMySlot() ? "  (tu)" : "";
-            sb.AppendLine((i + 1) + ". Jugador " + (ranking[i].Key + 1) + " - " + ranking[i].Value + " pts" + you);
-        }
-
-        BuildResultsPanel(sb.ToString());
-    }
-
-    // Crea por código un panel oscuro con el ranking, encima de toda la interfaz
-    private void BuildResultsPanel(string content)
-    {
-        Canvas canvas = scoreText != null ? scoreText.canvas : FindAnyObjectByType<Canvas>();
-        if (canvas == null)
-        {
-            Debug.Log(content);
-            return;
-        }
-        canvas = canvas.rootCanvas;
-
-        GameObject panel = new GameObject("PanelResultados", typeof(RectTransform), typeof(Image));
-        panel.transform.SetParent(canvas.transform, false);
-        panel.transform.SetAsLastSibling();
-
-        RectTransform rt = panel.GetComponent<RectTransform>();
-        rt.anchorMin = Vector2.zero;
-        rt.anchorMax = Vector2.one;
-        rt.offsetMin = Vector2.zero;
-        rt.offsetMax = Vector2.zero;
-        panel.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0.85f);
-
-        GameObject textObj = new GameObject("TextoResultados", typeof(RectTransform));
-        textObj.transform.SetParent(panel.transform, false);
-
-        RectTransform trt = textObj.GetComponent<RectTransform>();
-        trt.anchorMin = Vector2.zero;
-        trt.anchorMax = Vector2.one;
-        trt.offsetMin = new Vector2(40f, 220f);
-        trt.offsetMax = new Vector2(-40f, -40f);
-
-        TextMeshProUGUI tmp = textObj.AddComponent<TextMeshProUGUI>();
-        tmp.text = content;
-        tmp.alignment = TextAlignmentOptions.Center;
-        tmp.color = Color.white;
-        tmp.enableAutoSizing = true;
-        tmp.fontSizeMin = 20f;
-        tmp.fontSizeMax = 60f;
-
-        // Botón para volver al lobby
-        GameObject btnObj = new GameObject("BtnVolverLobby", typeof(RectTransform), typeof(Image), typeof(Button));
-        btnObj.transform.SetParent(panel.transform, false);
-
-        RectTransform brt = btnObj.GetComponent<RectTransform>();
-        brt.anchorMin = new Vector2(0.5f, 0f);
-        brt.anchorMax = new Vector2(0.5f, 0f);
-        brt.pivot = new Vector2(0.5f, 0f);
-        brt.anchoredPosition = new Vector2(0f, 60f);
-        brt.sizeDelta = new Vector2(420f, 110f);
-
-        Image btnImage = btnObj.GetComponent<Image>();
-        btnImage.color = new Color(0.8f, 0.5f, 0.25f, 1f);
-
-        Button backButton = btnObj.GetComponent<Button>();
-        backButton.targetGraphic = btnImage;
-        backButton.onClick.AddListener(BackToLobby);
-
-        GameObject labelObj = new GameObject("Texto", typeof(RectTransform));
-        labelObj.transform.SetParent(btnObj.transform, false);
-
-        RectTransform lrt = labelObj.GetComponent<RectTransform>();
-        lrt.anchorMin = Vector2.zero;
-        lrt.anchorMax = Vector2.one;
-        lrt.offsetMin = Vector2.zero;
-        lrt.offsetMax = Vector2.zero;
-
-        TextMeshProUGUI label = labelObj.AddComponent<TextMeshProUGUI>();
-        label.text = "Volver al lobby";
-        label.alignment = TextAlignmentOptions.Center;
-        label.color = Color.white;
-        label.fontSize = 40f;
-    }
-
-    private void BackToLobby()
-    {
-        UnityEngine.SceneManagement.SceneManager.LoadScene(lobbySceneName);
-    }
-
-    // ---------- Botones de power-up ----------
-
-    private void RefreshPowerUpButtons()
-    {
-        SetButtonState(btnTurbo, turboCharges > 0);
-        SetButtonState(btnCongelar, freezeCharges > 0);
-    }
-
-    private void SetButtonState(Button btn, bool active)
-    {
-        if (btn == null) return;
-
-        btn.interactable = active;
-        btn.transition = Selectable.Transition.None; // el color lo controlamos nosotros
-
-        if (btn.targetGraphic != null)
-            btn.targetGraphic.color = active ? buttonOnColor : buttonOffColor;
-
-        btn.transform.localScale = active ? Vector3.one : Vector3.one * 0.9f;
-    }
-
-    // ---------- Maíces ----------
-
-    // Todos los jugadores usan la misma semilla, así que generan EXACTAMENTE los mismos 50 maíces
     private void SpawnAllItems()
     {
         if (maizNormalPrefab == null)
         {
-            Debug.LogError("GameManager: falta asignar el prefab de Maíz Normal.");
+            Debug.LogError("[GM] Falta asignar el prefab de MaÃ­z Normal.");
             return;
         }
+        if (GameSession.ItemX == null || GameSession.ItemY == null || GameSession.ItemT == null) return;
 
-        int seed = GameSession.HasSeed ? GameSession.Seed : System.Environment.TickCount;
-        System.Random rng = new System.Random(seed);
-
-        for (int i = 0; i < TotalItems; i++)
+        int count = Mathf.Min(GameSession.ItemX.Length, Mathf.Min(GameSession.ItemY.Length, GameSession.ItemT.Length));
+        for (int i = 0; i < count; i++)
         {
-            float x = (float)(rng.NextDouble() * 90.0 - 45.0);
-            float y = (float)(rng.NextDouble() * 90.0 - 45.0);
-            double rand = rng.NextDouble();
+            ItemType type = (ItemType)GameSession.ItemT[i];
 
-            // 70% Normal, 15% Velocidad, 15% Congelar
-            GameObject selectedPrefab = maizNormalPrefab;
-            ItemType selectedType = ItemType.Normal;
+            GameObject prefab = maizNormalPrefab;
+            if (type == ItemType.SpeedBoost && maizVelocidadPrefab != null) prefab = maizVelocidadPrefab;
+            else if (type == ItemType.Freeze && maizCongelarPrefab != null) prefab = maizCongelarPrefab;
 
-            if (rand > 0.85 && maizCongelarPrefab != null)
-            {
-                selectedPrefab = maizCongelarPrefab;
-                selectedType = ItemType.Freeze;
-            }
-            else if (rand > 0.70 && maizVelocidadPrefab != null)
-            {
-                selectedPrefab = maizVelocidadPrefab;
-                selectedType = ItemType.SpeedBoost;
-            }
+            Vector3 pos = new Vector3(GameSession.ItemX[i], GameSession.ItemY[i], 0f);
+            GameObject itemObj = Instantiate(prefab, pos, Quaternion.identity);
+            itemObj.name = "Maiz_" + i + "_" + type;
 
-            GameObject itemObj = Instantiate(selectedPrefab, new Vector3(x, y, 0f), Quaternion.identity);
             CollectibleItem itemScript = itemObj.GetComponent<CollectibleItem>();
             if (itemScript == null) itemScript = itemObj.AddComponent<CollectibleItem>();
-
             itemScript.itemID = i;
-            itemScript.type = selectedType;
+            itemScript.type = type;
             items[i] = itemScript;
         }
     }
 
-    // Cuando el pollo local toca un maíz
-    public void SendPickupRequest(int id, ItemType type)
+    // Lo llama CollectibleItem cuando el pollo local toca un maÃ­z
+    public void SendPickupRequest(int id)
     {
-        if (!gameActive) return;
+        if (!gameActive || !IsOnline) return;
 
-        // Modo local: se resuelve aquí mismo
-        if (!IsOnline)
-        {
-            OnItemPickedUp(id, GetMySlot(), type);
-            return;
-        }
-
-        // En línea: el servidor decide quién llegó primero
-        PickupPayload payload = new PickupPayload
-        {
-            playerSlot = GetMySlot(),
-            itemID = id,
-            itemType = type.ToString()
-        };
+        PickupRequestPayload payload = new PickupRequestPayload { playerSlot = MySlot, itemID = id };
         SocketClient.Instance.SendMessageToServer("PICKUP_ITEM", payload);
     }
 
-    // Resultado final de quién recogió el maíz (lo llaman el modo local y el servidor)
+    // El servidor confirma quiÃ©n se quedÃ³ con el maÃ­z: desaparece en TODOS los celulares
     public void OnItemPickedUp(int itemID, int winnerSlot, ItemType type)
     {
-        if (!items.TryGetValue(itemID, out CollectibleItem item) || item == null) return;
+        if (!items.TryGetValue(itemID, out CollectibleItem item)) return;
         items.Remove(itemID);
+        if (item == null) return;
 
-        if (winnerSlot == GetMySlot())
+        SpriteRenderer sr = item.GetComponentInChildren<SpriteRenderer>();
+        GameFx.Pop(sr);
+
+        if (winnerSlot == MySlot && localPlayer != null)
         {
-            // Los 50 maíces suman 1 punto, sin importar el tipo
-            myScore++;
-            UpdateScoreUI();
-
-            // Los especiales además se guardan para activarlos con su botón
-            if (type == ItemType.SpeedBoost) turboCharges++;
-            else if (type == ItemType.Freeze) freezeCharges++;
-
-            RefreshPowerUpButtons();
+            Vector3 p = localPlayer.transform.position;
+            if (type == ItemType.Normal)
+            {
+                Play(pickupClip);
+                GameFx.FloatingText(p, "+1", Color.white);
+            }
+            else if (type == ItemType.SpeedBoost)
+            {
+                Play(specialClip != null ? specialClip : pickupClip);
+                GameFx.FloatingText(p, "+2  TURBO", new Color(1f, 0.85f, 0.2f));
+                ShowStatus("Â¡Ganaste una carga de TURBO!", 1.5f, new Color(1f, 0.85f, 0.2f));
+            }
+            else
+            {
+                Play(specialClip != null ? specialClip : pickupClip);
+                GameFx.FloatingText(p, "+2  HIELO", new Color(0.5f, 0.85f, 1f));
+                ShowStatus("Â¡Ganaste una carga de HIELO!", 1.5f, new Color(0.5f, 0.85f, 1f));
+            }
         }
 
-        Destroy(item.gameObject); // desaparece en la pantalla de TODOS
+        Destroy(item.gameObject);
     }
 
-    // ---------- Activación de power-ups ----------
+    // =================================================================================
+    //  Puntajes y cargas (el servidor es la autoridad)
+    // =================================================================================
 
+    public void OnScoreUpdate(int[] slots, int[] scores, int[] itemCounts)
+    {
+        if (slots == null || scores == null) return;
+
+        scoresBySlot.Clear();
+        itemsBySlot.Clear();
+        for (int i = 0; i < slots.Length && i < scores.Length; i++)
+        {
+            scoresBySlot[slots[i]] = scores[i];
+            itemsBySlot[slots[i]] = (itemCounts != null && i < itemCounts.Length) ? itemCounts[i] : 0;
+        }
+
+        scoresBySlot.TryGetValue(MySlot, out myScore);
+        itemsBySlot.TryGetValue(MySlot, out myItems);
+
+        UpdateScoreUI();
+        UpdateRanking();
+    }
+
+    public void OnChargesUpdate(int speed, int freeze)
+    {
+        turboCharges = speed;
+        freezeCharges = freeze;
+        RefreshPowerUpButtons();
+    }
+
+    // =================================================================================
+    //  Power-ups
+    // =================================================================================
+
+    // BotÃ³n TURBO
     public void ActivateTurbo()
     {
-        if (!gameActive || turboCharges <= 0) return;
+        if (!CanRequestPowerUp()) return;
+        if (turboCharges <= 0)
+        {
+            ShowStatus("Recoge un maÃ­z arcoÃ­ris para tener TURBO", 1.5f, Color.white);
+            return;
+        }
 
-        turboCharges--;
-        RefreshPowerUpButtons();
-
-        if (localPlayer != null) localPlayer.ApplySpeedBoost(turboDuration);
+        nextPowerUpRequest = Time.time + 0.4f;
+        SocketClient.Instance.SendMessageToServer("USE_POWERUP",
+            new PowerUpRequestPayload { senderSlot = MySlot, powerUpType = "SPEED" });
     }
 
+    // BotÃ³n CONGELAR (afecta al rival mÃ¡s cercano; lo elige el servidor)
     public void ActivateFreeze()
     {
-        if (!gameActive || freezeCharges <= 0) return;
-
-        freezeCharges--;
-        myScore += freezeBonusPoints; // Ventaja para quien congela
-        UpdateScoreUI();
-        RefreshPowerUpButtons();
-
-        if (IsOnline)
+        if (!CanRequestPowerUp()) return;
+        if (freezeCharges <= 0)
         {
-            PowerUpPayload payload = new PowerUpPayload
-            {
-                senderSlot = GetMySlot(),
-                targetSlot = -1,
-                powerUpType = "FREEZE"
-            };
-            SocketClient.Instance.SendMessageToServer("USE_POWERUP", payload);
+            ShowStatus("Recoge un maÃ­z de hielo para poder congelar", 1.5f, Color.white);
+            return;
         }
+        if (remotePlayers.Count == 0)
+        {
+            ShowStatus("No hay rivales para congelar", 1.5f, Color.white);
+            return;
+        }
+
+        nextPowerUpRequest = Time.time + 0.4f;
+        SocketClient.Instance.SendMessageToServer("USE_POWERUP",
+            new PowerUpRequestPayload { senderSlot = MySlot, powerUpType = "FREEZE" });
     }
 
-    // Compatibilidad: si el BtnCongelar aún tiene este método en su OnClick, funciona igual
+    // Compatibilidad con el OnClick antiguo del BtnCongelar
     public void TryFreezeTargetPlayer(int targetSlot)
     {
         ActivateFreeze();
     }
 
-    // El servidor avisa que otro jugador usó un power-up
-    public void OnPowerUpUsed(int senderSlot, string powerUpType)
+    private bool CanRequestPowerUp()
     {
-        if (!gameActive || senderSlot == GetMySlot()) return;
-
-        if (powerUpType == "FREEZE") OnFrozenByRival();
+        if (!gameActive || !IsOnline || localPlayer == null) return false;
+        if (Time.time < nextPowerUpRequest) return false;
+        if (localPlayer.IsFrozen)
+        {
+            ShowStatus("Â¡EstÃ¡s congelado!", 1f, new Color(0.5f, 0.85f, 1f));
+            return false;
+        }
+        return true;
     }
 
-    private void OnFrozenByRival()
+    // El servidor confirma un power-up (se envÃ­a a TODOS para que todos vean el efecto)
+    public void OnPowerUpUsed(int senderSlot, int targetSlot, string type, float duration)
     {
-        myScore = Mathf.Max(0, myScore - freezePenaltyPoints);
-        UpdateScoreUI();
+        if (!gameActive) return;
 
-        if (localPlayer != null) localPlayer.FreezePlayer(freezeDuration);
+        if (type == "SPEED")
+        {
+            if (senderSlot == MySlot)
+            {
+                localPlayer.ApplySpeedBoost(duration);
+                Play(turboClip);
+                GameFx.FloatingText(localPlayer.transform.position, "Â¡TURBO!", new Color(1f, 0.85f, 0.2f));
+            }
+            else if (remotePlayers.TryGetValue(senderSlot, out RemotePlayer rp) && rp != null && rp.Anim != null)
+            {
+                rp.Anim.SetTurbo(duration);
+            }
+        }
+        else if (type == "FREEZE")
+        {
+            if (targetSlot == MySlot)
+            {
+                localPlayer.FreezePlayer(duration);
+                Play(frozenClip);
+                ShowStatus("Â¡" + GameSession.PlayerName(senderSlot) + " te congelÃ³!", duration, new Color(0.5f, 0.85f, 1f));
+                GameFx.FloatingText(localPlayer.transform.position, "Â¡CONGELADO!", new Color(0.5f, 0.85f, 1f));
+            }
+            else if (remotePlayers.TryGetValue(targetSlot, out RemotePlayer rp) && rp != null)
+            {
+                if (rp.Anim != null) rp.Anim.SetFrozen(duration);
+                GameFx.FloatingText(rp.transform.position, "Â¡CONGELADO!", new Color(0.5f, 0.85f, 1f));
+            }
+
+            if (senderSlot == MySlot)
+            {
+                Play(freezeClip);
+                ShowStatus("Â¡Congelaste a " + GameSession.PlayerName(targetSlot) + "!", 2f, new Color(0.5f, 0.85f, 1f));
+            }
+        }
     }
 
-    // ---------- Otros jugadores ----------
+    // =================================================================================
+    //  Otros jugadores
+    // =================================================================================
 
     private void SpawnRemotePlayers()
     {
-        if (!IsOnline || GameSession.Slots == null || localPlayer == null) return;
+        if (GameSession.Slots == null || localPlayer == null) return;
 
         foreach (int slot in GameSession.Slots)
         {
-            if (slot == GetMySlot()) continue;
+            if (slot == MySlot) continue;
             CreateRemotePlayer(slot);
         }
     }
 
     private void CreateRemotePlayer(int slot)
     {
-        Vector2 pos = StartPosition(slot);
+        Vector2 pos = GameSession.SpawnOf(slot);
 
         GameObject go = Instantiate(localPlayer.gameObject, pos, Quaternion.identity);
         go.name = "Pollo_Remoto_" + slot;
@@ -578,20 +462,25 @@ public class GameManager : MonoBehaviour
         }
 
         Rigidbody2D rb = go.GetComponent<Rigidbody2D>();
-        if (rb != null) rb.bodyType = RigidbodyType2D.Kinematic;
+        if (rb != null)
+        {
+            rb.bodyType = RigidbodyType2D.Kinematic;
+            rb.linearVelocity = Vector2.zero;
+        }
 
         Collider2D col = go.GetComponent<Collider2D>();
         if (col != null) col.isTrigger = true;
 
-        // Aplicar la skin del pollo según la elección guardada en GameSession
+        ChickenAnimator anim = EnsureAnimator(go);
         ApplySkin(go, slot, true);
+        CreateNameLabel(go, "J" + (slot + 1), Color.white);
 
         RemotePlayer rp = go.AddComponent<RemotePlayer>();
-        rp.Init(pos);
+        rp.Init(slot, pos, anim);
         remotePlayers[slot] = rp;
     }
 
-    // Envía mi posición unas 20 veces por segundo, solo si me moví
+    // EnvÃ­a mi posiciÃ³n unas 20 veces por segundo, solo si me movÃ­
     private void SendMyPosition()
     {
         if (!IsOnline || localPlayer == null) return;
@@ -604,13 +493,13 @@ public class GameManager : MonoBehaviour
         if ((pos - lastSentPos).sqrMagnitude < 0.0001f) return;
         lastSentPos = pos;
 
-        MovePayload payload = new MovePayload { playerSlot = GetMySlot(), posX = pos.x, posY = pos.y };
-        SocketClient.Instance.SendMessageToServer("MOVE", payload);
+        SocketClient.Instance.SendMessageToServer("MOVE",
+            new MovePayload { playerSlot = MySlot, posX = pos.x, posY = pos.y });
     }
 
     public void OnRemotePlayerMoved(int slot, Vector2 position)
     {
-        if (slot == GetMySlot()) return;
+        if (slot == MySlot) return;
         if (remotePlayers.TryGetValue(slot, out RemotePlayer rp) && rp != null)
             rp.SetTarget(position);
     }
@@ -622,21 +511,392 @@ public class GameManager : MonoBehaviour
             if (rp != null) Destroy(rp.gameObject);
             remotePlayers.Remove(slot);
         }
+        ShowStatus(GameSession.PlayerName(slot) + " saliÃ³ de la partida", 2f, Color.white);
     }
 
-    // ---------- Pruebas sin red (clic derecho en el componente GameManager, en Play) ----------
+    // =================================================================================
+    //  Utilidades de jugadores
+    // =================================================================================
 
-    [ContextMenu("PRUEBA: darme 1 turbo y 1 hielo")]
-    private void TestGivePowerUps()
+    private PlayerController FindLocalPlayer()
     {
-        turboCharges++;
-        freezeCharges++;
-        RefreshPowerUpButtons();
+        foreach (var p in FindObjectsByType<PlayerController>(FindObjectsInactive.Exclude))
+            if (p.isLocalPlayer) return p;
+        return null;
     }
 
-    [ContextMenu("PRUEBA: simular que un rival me congela")]
-    private void TestFrozenByRival()
+    private ChickenAnimator EnsureAnimator(GameObject go)
     {
-        OnFrozenByRival();
+        ChickenAnimator anim = go.GetComponent<ChickenAnimator>();
+        if (anim == null) anim = go.AddComponent<ChickenAnimator>();
+        return anim;
+    }
+
+    private void SetLocalPlayerLocked(bool locked)
+    {
+        if (localPlayer == null) return;
+
+        localPlayer.enabled = !locked;
+        if (locked)
+        {
+            Rigidbody2D rb = localPlayer.GetComponent<Rigidbody2D>();
+            if (rb != null) rb.linearVelocity = Vector2.zero;
+        }
+    }
+
+    // Pone el pollo que cada jugador eligiÃ³ en el lobby
+    private void ApplySkin(GameObject pollo, int slot, bool tintIfNoSprite)
+    {
+        ChickenAnimator anim = pollo.GetComponent<ChickenAnimator>();
+        SpriteRenderer sr = anim != null && anim.BodyRenderer != null ? anim.BodyRenderer : pollo.GetComponent<SpriteRenderer>();
+        if (sr == null) return;
+
+        sr.enabled = true;
+        sr.sortingOrder = 100;
+
+        int idx = GameSession.ChickenOf(slot);
+        bool hasSprite = chickenSprites != null && idx >= 0 && idx < chickenSprites.Length && chickenSprites[idx] != null;
+
+        Color color = Color.white;
+        if (hasSprite)
+            sr.sprite = chickenSprites[idx];
+        else if (tintIfNoSprite && playerColors != null && playerColors.Length > 0)
+            color = playerColors[Mathf.Abs(slot) % playerColors.Length];
+
+        if (anim != null) anim.SetBaseColor(color);
+        else sr.color = color;
+    }
+
+    // Etiqueta flotante sobre cada pollo ("TÃš", "J2"...) para relacionarlos con el ranking
+    private void CreateNameLabel(GameObject pollo, string text, Color color)
+    {
+        GameObject label = new GameObject("Label");
+        label.transform.SetParent(pollo.transform, false);
+
+        Vector3 s = pollo.transform.lossyScale;
+        float sx = Mathf.Approximately(s.x, 0f) ? 1f : s.x;
+        float sy = Mathf.Approximately(s.y, 0f) ? 1f : s.y;
+        label.transform.localScale = new Vector3(1f / Mathf.Abs(sx), 1f / Mathf.Abs(sy), 1f);
+        label.transform.localPosition = new Vector3(0f, nameLabelHeight / Mathf.Abs(sy), 0f);
+
+        TextMeshPro tmp = label.AddComponent<TextMeshPro>();
+        tmp.text = text;
+        tmp.fontSize = 22f;
+        tmp.fontStyle = FontStyles.Bold;
+        tmp.alignment = TextAlignmentOptions.Center;
+        tmp.color = color;
+        tmp.outlineWidth = 0.2f;
+        tmp.outlineColor = new Color32(0, 0, 0, 220);
+        tmp.sortingOrder = 250;
+        tmp.rectTransform.sizeDelta = new Vector2(20f, 5f);
+    }
+
+    // El pollo no debe chocar con el terreno ni con los muros: el lÃ­mite se controla por cÃ³digo
+    private void IgnoreSolidColliders()
+    {
+        if (localPlayer == null) return;
+
+        Collider2D myCollider = localPlayer.GetComponent<Collider2D>();
+        if (myCollider == null) return;
+
+        foreach (Collider2D other in FindObjectsByType<Collider2D>(FindObjectsInactive.Exclude))
+        {
+            if (other == myCollider || other.isTrigger) continue;
+            Physics2D.IgnoreCollision(myCollider, other);
+        }
+    }
+
+    private void Play(AudioClip clip)
+    {
+        if (clip != null && audioSource != null) audioSource.PlayOneShot(clip);
+    }
+
+    // =================================================================================
+    //  HUD
+    // =================================================================================
+
+    private void UpdateScoreUI()
+    {
+        if (scoreText != null)
+            scoreText.text = string.Format(scoreFormat, myScore, myItems);
+    }
+
+    private void UpdateRanking()
+    {
+        if (rankingText == null) return;
+
+        List<KeyValuePair<int, int>> list = new List<KeyValuePair<int, int>>(scoresBySlot);
+        list.Sort((a, b) => b.Value.CompareTo(a.Value));
+
+        StringBuilder sb = new StringBuilder("<b>RANKING</b>\n");
+        for (int i = 0; i < list.Count; i++)
+        {
+            bool me = list[i].Key == MySlot;
+            string name = me ? "TÃº" : "J" + (list[i].Key + 1);
+            string line = (i + 1) + ". " + name + "  " + list[i].Value;
+            sb.AppendLine(me ? "<color=#FFD54A>" + line + "</color>" : line);
+        }
+        rankingText.text = sb.ToString();
+    }
+
+    private void RefreshPowerUpButtons()
+    {
+        SetButtonState(btnTurbo, turboCharges > 0);
+        SetButtonState(btnCongelar, freezeCharges > 0);
+
+        if (turboBadge != null) turboBadge.text = "x" + turboCharges;
+        if (freezeBadge != null) freezeBadge.text = "x" + freezeCharges;
+    }
+
+    private void SetButtonState(Button btn, bool active)
+    {
+        if (btn == null) return;
+
+        // Se deja interactuable siempre para poder mostrar el mensaje "recoge un maÃ­z..."
+        btn.interactable = true;
+        btn.transition = Selectable.Transition.None;
+
+        if (btn.targetGraphic != null)
+            btn.targetGraphic.color = active ? buttonOnColor : buttonOffColor;
+
+        btn.transform.localScale = active ? Vector3.one : Vector3.one * 0.9f;
+    }
+
+    private void ShowStatus(string text, float seconds, Color color)
+    {
+        if (statusText == null) return;
+        statusText.text = text;
+        statusText.color = color;
+        statusUntil = Time.time + seconds;
+    }
+
+    // Cuando no hay un mensaje temporal, muestra el estado del jugador
+    private void UpdateStatusText()
+    {
+        if (statusText == null || Time.time < statusUntil) return;
+
+        if (gameActive && localPlayer != null && localPlayer.IsFrozen)
+        {
+            statusText.text = "Â¡CONGELADO!";
+            statusText.color = new Color(0.5f, 0.85f, 1f);
+        }
+        else if (gameActive && localPlayer != null && localPlayer.IsBoosted)
+        {
+            statusText.text = "TURBO ACTIVO";
+            statusText.color = new Color(1f, 0.85f, 0.2f);
+        }
+        else
+        {
+            statusText.text = "";
+        }
+    }
+
+    // Crea por cÃ³digo lo que falte del HUD (ranking, estado y contadores de cargas)
+    private void EnsureHud()
+    {
+        Canvas canvas = null;
+        if (timerText != null) canvas = timerText.canvas;
+        else if (scoreText != null) canvas = scoreText.canvas;
+        if (canvas == null) canvas = FindAnyObjectByType<Canvas>();
+        if (canvas == null) return;
+        canvas = canvas.rootCanvas;
+
+        if (scoreText != null)
+        {
+            scoreText.enableAutoSizing = true;
+            scoreText.fontSizeMax = Mathf.Max(scoreText.fontSize, 20f);
+            scoreText.fontSizeMin = 12f;
+        }
+
+        if (rankingText == null)
+        {
+            rankingText = CreateUIText(canvas.transform, "RankingText",
+                new Vector2(1f, 1f), new Vector2(-30f, -30f), new Vector2(360f, 230f), 30f,
+                TextAlignmentOptions.TopRight);
+        }
+
+        if (statusText == null)
+        {
+            statusText = CreateUIText(canvas.transform, "StatusText",
+                new Vector2(0.5f, 1f), new Vector2(0f, -150f), new Vector2(1000f, 80f), 42f,
+                TextAlignmentOptions.Center);
+        }
+
+        if (btnTurbo != null) turboBadge = CreateBadge(btnTurbo);
+        if (btnCongelar != null) freezeBadge = CreateBadge(btnCongelar);
+    }
+
+    private TextMeshProUGUI CreateBadge(Button btn)
+    {
+        Transform existing = btn.transform.Find("Badge");
+        if (existing != null) return existing.GetComponent<TextMeshProUGUI>();
+
+        TextMeshProUGUI t = CreateUIText(btn.transform, "Badge",
+            new Vector2(1f, 1f), new Vector2(10f, 10f), new Vector2(110f, 60f), 40f,
+            TextAlignmentOptions.TopRight);
+        t.fontStyle = FontStyles.Bold;
+        t.outlineWidth = 0.25f;
+        t.outlineColor = new Color32(0, 0, 0, 255);
+        t.raycastTarget = false;
+        return t;
+    }
+
+    private TextMeshProUGUI CreateUIText(Transform parent, string name, Vector2 anchor, Vector2 position,
+                                         Vector2 size, float fontSize, TextAlignmentOptions align)
+    {
+        GameObject go = new GameObject(name, typeof(RectTransform));
+        go.transform.SetParent(parent, false);
+
+        RectTransform rt = go.GetComponent<RectTransform>();
+        rt.anchorMin = anchor;
+        rt.anchorMax = anchor;
+        rt.pivot = anchor;
+        rt.anchoredPosition = position;
+        rt.sizeDelta = size;
+
+        TextMeshProUGUI t = go.AddComponent<TextMeshProUGUI>();
+        t.fontSize = fontSize;
+        t.alignment = align;
+        t.color = Color.white;
+        t.raycastTarget = false;
+        t.text = "";
+        return t;
+    }
+
+    // =================================================================================
+    //  Pantalla de resultados
+    // =================================================================================
+
+    private void BuildResultsPanel(ResultsPayload r)
+    {
+        int winnersCount = 0;
+        bool iWon = false;
+        List<string> winnerNames = new List<string>();
+        for (int i = 0; i < r.slots.Length; i++)
+        {
+            if (r.winners != null && i < r.winners.Length && r.winners[i] == 1)
+            {
+                winnersCount++;
+                winnerNames.Add(GameSession.PlayerName(r.slots[i]));
+                if (r.slots[i] == MySlot) iWon = true;
+            }
+        }
+
+        StringBuilder sb = new StringBuilder();
+        if (winnersCount > 1)
+            sb.AppendLine("<size=130%><color=#FFD54A>Â¡EMPATE! Victoria compartida</color></size>");
+        else if (iWon)
+            sb.AppendLine("<size=130%><color=#FFD54A>Â¡GANASTE!</color></size>");
+        else if (winnersCount == 1)
+            sb.AppendLine("<size=130%><color=#FFD54A>GANADOR: " + winnerNames[0] + "</color></size>");
+        else
+            sb.AppendLine("<size=130%>FIN DEL JUEGO</size>");
+
+        sb.AppendLine();
+
+        for (int i = 0; i < r.slots.Length; i++)
+        {
+            int slot = r.slots[i];
+            int score = r.scores != null && i < r.scores.Length ? r.scores[i] : 0;
+            int its = r.items != null && i < r.items.Length ? r.items[i] : 0;
+            int sp = r.specials != null && i < r.specials.Length ? r.specials[i] : 0;
+            bool winner = r.winners != null && i < r.winners.Length && r.winners[i] == 1;
+
+            string line = (i + 1) + ". " + GameSession.PlayerName(slot) + (slot == MySlot ? " (tÃº)" : "") +
+                          "  -  " + score + " pts  (" + its + " maÃ­ces, " + sp + " especiales)";
+            sb.AppendLine(winner ? "<color=#FFD54A>" + line + "</color>" : line);
+        }
+
+        sb.AppendLine();
+        sb.Append("<size=70%>Desempate: mÃ¡s maÃ­ces especiales. Si siguen iguales, victoria compartida.</size>");
+
+        Canvas canvas = scoreText != null ? scoreText.canvas : FindAnyObjectByType<Canvas>();
+        if (canvas == null)
+        {
+            Debug.Log(sb.ToString());
+            return;
+        }
+        canvas = canvas.rootCanvas;
+
+        Transform old = canvas.transform.Find("PanelResultados");
+        if (old != null) Destroy(old.gameObject);
+
+        GameObject panel = new GameObject("PanelResultados", typeof(RectTransform), typeof(Image));
+        panel.transform.SetParent(canvas.transform, false);
+        panel.transform.SetAsLastSibling();
+
+        RectTransform rt = panel.GetComponent<RectTransform>();
+        rt.anchorMin = Vector2.zero;
+        rt.anchorMax = Vector2.one;
+        rt.offsetMin = Vector2.zero;
+        rt.offsetMax = Vector2.zero;
+        panel.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0.85f);
+
+        TextMeshProUGUI tmp = CreateUIText(panel.transform, "TextoResultados",
+            new Vector2(0.5f, 0.5f), new Vector2(0f, 60f), new Vector2(1500f, 650f), 46f,
+            TextAlignmentOptions.Center);
+        tmp.enableAutoSizing = true;
+        tmp.fontSizeMin = 18f;
+        tmp.fontSizeMax = 52f;
+        tmp.text = sb.ToString();
+
+        CreatePanelButton(panel.transform, "BtnJugarOtraVez", "Jugar otra vez", new Vector2(-260f, 60f),
+            new Color(0.8f, 0.5f, 0.25f), BackToLobby);
+        CreatePanelButton(panel.transform, "BtnMenu", "MenÃº principal", new Vector2(260f, 60f),
+            new Color(0.35f, 0.35f, 0.35f), GoToMainMenu);
+    }
+
+    private void CreatePanelButton(Transform parent, string name, string label, Vector2 pos, Color color,
+                                   UnityEngine.Events.UnityAction action)
+    {
+        GameObject btnObj = new GameObject(name, typeof(RectTransform), typeof(Image), typeof(Button));
+        btnObj.transform.SetParent(parent, false);
+
+        RectTransform brt = btnObj.GetComponent<RectTransform>();
+        brt.anchorMin = new Vector2(0.5f, 0f);
+        brt.anchorMax = new Vector2(0.5f, 0f);
+        brt.pivot = new Vector2(0.5f, 0f);
+        brt.anchoredPosition = pos;
+        brt.sizeDelta = new Vector2(440f, 110f);
+
+        Image img = btnObj.GetComponent<Image>();
+        img.color = color;
+
+        Button b = btnObj.GetComponent<Button>();
+        b.targetGraphic = img;
+        b.onClick.AddListener(action);
+
+        TextMeshProUGUI t = CreateUIText(btnObj.transform, "Texto", new Vector2(0.5f, 0.5f), Vector2.zero,
+            new Vector2(440f, 110f), 40f, TextAlignmentOptions.Center);
+        t.text = label;
+    }
+
+    private void BackToLobby()
+    {
+        if (IsOnline) SceneManager.LoadScene(lobbySceneName);
+        else GoToMainMenu();
+    }
+
+    private void GoToMainMenu()
+    {
+        SocketClient.Instance?.Disconnect();
+        if (GameServer.IsRunning) GameServer.StopServer();
+        SceneManager.LoadScene(mainMenuSceneName);
+    }
+
+    // =================================================================================
+    //  Pruebas en el editor (clic derecho en el componente GameManager, en Play)
+    // =================================================================================
+
+    [ContextMenu("PRUEBA: efecto turbo local")]
+    private void TestTurbo()
+    {
+        if (localPlayer != null) localPlayer.ApplySpeedBoost(5f);
+    }
+
+    [ContextMenu("PRUEBA: efecto congelado local")]
+    private void TestFrozen()
+    {
+        if (localPlayer != null) localPlayer.FreezePlayer(3f);
     }
 }

@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 using UnityEngine.UI;
 
 public class LobbyCustomization : MonoBehaviour
@@ -6,7 +6,7 @@ public class LobbyCustomization : MonoBehaviour
     [Header("UI General")]
     [SerializeField] private GameObject chickenOptionsPanel; // Objeto 'OpcionesColores'
 
-    [Header("Pollos disponibles")]
+    [Header("Pollos disponibles (MISMO ORDEN que en GameManager)")]
     [SerializeField] private Sprite[] chickenSprites;
 
     [Header("Elementos de los 4 nidos")]
@@ -14,9 +14,9 @@ public class LobbyCustomization : MonoBehaviour
     [SerializeField] private Button[] editButtons;     // Los 4 botones de Lápiz
     [SerializeField] private Button[] confirmButtons;  // Los 4 botones de Chulo (✔)
 
-    private int localPlayerSlot = 0;   // Slot de este jugador
-    private int confirmedChicken = 0;  // Pollo guardado
-    private int tempChicken = 0;       // Selección temporal
+    private int localPlayerSlot = 0;
+    private int confirmedChicken = 0;
+    private int tempChicken = 0;
 
     private void Awake()
     {
@@ -26,13 +26,13 @@ public class LobbyCustomization : MonoBehaviour
 
     private void Start()
     {
-        UpdateConnectedPlayers(1);
+        UpdateConnectedPlayers(new[] { GameSession.MySlot });
     }
 
     public void SetLocalPlayerSlot(int slot)
     {
+        if (chickenPreviews == null || chickenPreviews.Length == 0) return;
         localPlayerSlot = Mathf.Clamp(slot, 0, chickenPreviews.Length - 1);
-        Debug.Log("Mi slot asignado en LobbyCustomization es: " + localPlayerSlot);
     }
 
     public void UpdateConnectedPlayers(int activePlayerCount)
@@ -65,22 +65,20 @@ public class LobbyCustomization : MonoBehaviour
     // --- ABRIR PALETA DE OPCIONES ---
     public void OpenOptionsForSlot(int slotIndex)
     {
-        if (slotIndex == localPlayerSlot)
+        if (slotIndex != localPlayerSlot || chickenOptionsPanel == null) return;
+
+        tempChicken = confirmedChicken;
+
+        if (chickenPreviews != null && slotIndex < chickenPreviews.Length && chickenPreviews[slotIndex] != null)
         {
-            tempChicken = confirmedChicken;
-
-            // Reposiciona la ventana sobre el nido actual
-            if (chickenPreviews != null && slotIndex < chickenPreviews.Length && chickenPreviews[slotIndex] != null)
-            {
-                Vector3 nestPos = chickenPreviews[slotIndex].transform.position;
-                chickenOptionsPanel.transform.position = new Vector3(nestPos.x, chickenOptionsPanel.transform.position.y, nestPos.z);
-            }
-
-            chickenOptionsPanel.SetActive(true);
+            Vector3 nestPos = chickenPreviews[slotIndex].transform.position;
+            chickenOptionsPanel.transform.position = new Vector3(nestPos.x, chickenOptionsPanel.transform.position.y, nestPos.z);
         }
+
+        chickenOptionsPanel.SetActive(true);
     }
 
-    // --- SELECCIONAR HUEVO/COLOR DE LA PALETA ---
+    // --- SELECCIONAR POLLO DE LA PALETA ---
     public void SelectChicken(int chickenIndex)
     {
         if (chickenSprites == null || chickenIndex < 0 || chickenIndex >= chickenSprites.Length)
@@ -88,77 +86,49 @@ public class LobbyCustomization : MonoBehaviour
 
         tempChicken = chickenIndex;
 
-        // Muestra la vista previa del nido local
         if (chickenPreviews != null && localPlayerSlot < chickenPreviews.Length && chickenPreviews[localPlayerSlot] != null)
-        {
             chickenPreviews[localPlayerSlot].sprite = chickenSprites[tempChicken];
-        }
     }
 
-    // --- CONFIRMAR SELECCIÓN (BOTÓN CHULO ✔) ---
-    // En LobbyCustomization.cs
+    // --- CONFIRMAR (✔) ---
     public void ConfirmSelection()
     {
         confirmedChicken = tempChicken;
 
-        // Guardar localmente
-        SaveChickenToSession(localPlayerSlot, confirmedChicken);
-
-        // Actualizar el sprite local
-        if (chickenPreviews != null && localPlayerSlot < chickenPreviews.Length)
+        if (chickenPreviews != null && localPlayerSlot < chickenPreviews.Length && chickenPreviews[localPlayerSlot] != null
+            && chickenSprites != null && confirmedChicken < chickenSprites.Length)
             chickenPreviews[localPlayerSlot].sprite = chickenSprites[confirmedChicken];
 
         if (chickenOptionsPanel != null)
             chickenOptionsPanel.SetActive(false);
 
-        // AVISAR AL SERVIDO ENVIANDO EL SLOT ASIGNADO
+        // El servidor guarda la elección y se la reenvía a todos (también al que vuelve de una partida)
         LobbyNetworkManager.Instance?.SendChickenChoice(localPlayerSlot, confirmedChicken);
     }
 
-    // --- CANCELAR SELECCIÓN (BOTÓN X) ---
+    // --- CANCELAR (X) ---
     public void CancelSelection()
     {
-        if (chickenPreviews != null && localPlayerSlot < chickenPreviews.Length && chickenPreviews[localPlayerSlot] != null)
-        {
-            if (confirmedChicken >= 0 && confirmedChicken < chickenSprites.Length)
-                chickenPreviews[localPlayerSlot].sprite = chickenSprites[confirmedChicken];
-        }
+        if (chickenPreviews != null && localPlayerSlot < chickenPreviews.Length && chickenPreviews[localPlayerSlot] != null
+            && chickenSprites != null && confirmedChicken >= 0 && confirmedChicken < chickenSprites.Length)
+            chickenPreviews[localPlayerSlot].sprite = chickenSprites[confirmedChicken];
 
         if (chickenOptionsPanel != null)
             chickenOptionsPanel.SetActive(false);
     }
 
-    // --- RECIBIR EL POLLO DE OTRO JUGADOR DESDE LA RED ---
+    // --- POLLO QUE LLEGA DESDE LA RED (de cualquier jugador, incluido yo) ---
     public void SetRemotePlayerChicken(int targetSlot, int chickenIndex)
     {
-        // Guardar la elección remota en la sesión
-        SaveChickenToSession(targetSlot, chickenIndex);
-
-        if (chickenPreviews == null || targetSlot < 0 || targetSlot >= chickenPreviews.Length)
-            return;
-
-        if (chickenSprites != null && chickenIndex >= 0 && chickenIndex < chickenSprites.Length)
+        if (targetSlot == localPlayerSlot)
         {
-            if (chickenPreviews[targetSlot] != null)
-                chickenPreviews[targetSlot].sprite = chickenSprites[chickenIndex];
-        }
-    }
-
-    private void SaveChickenToSession(int slot, int chickenIndex)
-    {
-        if (GameSession.Slots == null || GameSession.Chickens == null || GameSession.Slots.Length == 0)
-        {
-            GameSession.Slots = new int[] { 0, 1, 2, 3 };
-            GameSession.Chickens = new int[] { 0, 0, 0, 0 };
+            confirmedChicken = chickenIndex;
+            tempChicken = chickenIndex;
         }
 
-        for (int i = 0; i < GameSession.Slots.Length; i++)
-        {
-            if (GameSession.Slots[i] == slot)
-            {
-                GameSession.Chickens[i] = chickenIndex;
-                break;
-            }
-        }
+        if (chickenPreviews == null || targetSlot < 0 || targetSlot >= chickenPreviews.Length) return;
+
+        if (chickenSprites != null && chickenIndex >= 0 && chickenIndex < chickenSprites.Length && chickenPreviews[targetSlot] != null)
+            chickenPreviews[targetSlot].sprite = chickenSprites[chickenIndex];
     }
 }

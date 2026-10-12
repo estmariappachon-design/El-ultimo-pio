@@ -8,73 +8,155 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 
-// Servidor de la partida. Se ejecuta como aplicaciÛn de consola, aparte de Unity.
-// Formato de cada mensaje (una lÌnea): {"type":"X","payload":"<json escapado como texto>"}
+// =====================================================================================
+//  SERVIDOR DE LA PARTIDA (TCP Sockets)
+//  Corre DENTRO del celular que pulsa "Crear partida" (hilo en segundo plano).
+//  Tambi√©n puede compilarse como app de consola (ver el Main al final del archivo).
 //
-// Flujo de una partida:
-//   Lobby:  JOIN_UPDATE / SET_CHICKEN
-//   Inicio: host envÌa START_GAME -> todos cargan la escena y responden GAME_READY
-//           -> cuando todos est·n listos (o pasan 15 s) el servidor envÌa GAME_BEGIN
-//   Juego:  PICKUP_ITEM / USE_POWERUP / MOVE
-//   Final:  a los 120 s el servidor envÌa GAME_OVER -> cada cliente responde FINAL_SCORE
-//           -> el servidor envÌa RESULTS con los puntajes de todos
-public class GameServer
+//  Formato de cada mensaje (una l√≠nea): {"type":"X","payload":"<json escapado como texto>"}
+//
+//  Flujo:
+//   Lobby : JOIN_UPDATE / SET_CHICKEN / LOBBY_REFRESH
+//   Inicio: host env√≠a START_GAME -> el servidor genera spawns + 50 ma√≠ces y los manda a todos
+//           -> cada cliente carga la escena y responde GAME_READY -> el servidor env√≠a GAME_BEGIN
+//   Juego : MOVE / PICKUP_ITEM -> ITEM_PICKED_UP + SCORE_UPDATE + CHARGES
+//           USE_POWERUP -> POWERUP_USED (a todos) + CHARGES (al que lo us√≥)
+//   Final : GAME_OVER + RESULTS (el servidor calcula puntajes, ganador y desempate)
+//
+//  El servidor es la AUTORIDAD: decide qui√©n recoge cada ma√≠z, cu√°nto vale, cu√°ntas cargas
+//  de power-up tiene cada jugador y a qui√©n congela el hielo (al rival m√°s cercano).
+// =====================================================================================
+public static class GameServer
 {
-    private const int Port = 8888;
-    private const int MaxPlayers = 4;
-    private const int TotalItems = 50;
-    private const int GameDurationSeconds = 120;
+    // ---------- Configuraci√≥n (variables de balance) ----------
+    public const int DefaultPort = 8888;
+    public const int MaxPlayers = 4;
+    public static int MinPlayers = 2;               // se puede bajar a 1 SOLO para pruebas
+    public static int GameDurationSeconds = 120;    // duraci√≥n de la partida
+
+    public static int PointsNormal = 1;             // ma√≠z normal
+    public static int PointsSpecial = 2;            // ma√≠z arco√≠ris o de hielo
+    public static int MaxCharges = 3;               // m√°ximo de cargas acumuladas por power-up
+    public static float SpeedDuration = 5f;         // segundos de turbo (doc: 3 a 6)
+    public static float FreezeDuration = 3f;        // segundos congelado (doc: 2 a 4)
+    public static float PowerUpCooldown = 2f;       // segundos entre usos de power-ups
+    public static float MaxPickupDistance = 6f;     // validaci√≥n anti-trampa del servidor
+
     private const int ReadyTimeoutMs = 15000;
-    private const int ResultsTimeoutMs = 5000;
 
-    private static TcpListener server;
+    // Para ver los mensajes del servidor en la consola de Unity (lo asigna MainMenuManager)
+    public static Action<string> Log = s => Console.WriteLine(s);
+
+    // ---------- Estado ----------
+    private static TcpListener listener;
+    private static Thread acceptThread;
+    private static volatile bool running = false;
+
     private static readonly List<ClientHandler> clients = new List<ClientHandler>();
-    private static readonly HashSet<int> collectedItemIDs = new HashSet<int>();
     private static readonly HashSet<int> readySlots = new HashSet<int>();
-    private static readonly Dictionary<int, int> finalScores = new Dictionary<int, int>();
-    private static readonly HashSet<string> validItemTypes = new HashSet<string> { "Normal", "SpeedBoost", "Freeze" };
-    private static readonly Random rng = new Random();
-    private static readonly object stateLock = new object(); // protege todo el estado de arriba y de abajo
+    private static readonly System.Random rng = new System.Random();
+    private static readonly object stateLock = new object();
 
-    private static bool gameStarted = false; // el host pulsÛ EMPEZAR
-    private static bool gameBegan = false;   // ya corre el reloj de la partida
-    private static bool gameOver = false;    // se acabÛ el tiempo
-    private static bool resultsSent = false;
+    private static bool gameStarted = false; // el host puls√≥ EMPEZAR
+    private static bool gameBegan = false;   // ya corre el reloj
+    private static bool gameOver = false;
+
+    private static float[] itemX = new float[MatchGenerator.TotalItems];
+    private static float[] itemY = new float[MatchGenerator.TotalItems];
+    private static int[] itemT = new int[MatchGenerator.TotalItems];
+    private static readonly HashSet<int> collectedItemIDs = new HashSet<int>();
 
     private static Timer readyTimer;
     private static Timer gameTimer;
-    private static Timer resultsTimer;
 
-    public static void Main(string[] args)
+    public static bool IsRunning => running;
+
+    // =================================================================================
+    //  Arranque y parada
+    // =================================================================================
+
+    public static bool StartServer(int port = DefaultPort)
     {
-        server = new TcpListener(IPAddress.Any, Port);
-        server.Start();
-        Console.WriteLine("Servidor de Sockets iniciado en el puerto " + Port + "...");
+        if (running) return true;
 
-        while (true)
+        try
         {
-            TcpClient tcp = server.AcceptTcpClient();
-            tcp.NoDelay = true; // menos latencia para el movimiento
+            listener = new TcpListener(IPAddress.Any, port);
+            listener.Start();
+        }
+        catch (Exception e)
+        {
+            Log("[Servidor] No se pudo abrir el puerto " + port + ": " + e.Message);
+            listener = null;
+            return false;
+        }
+
+        running = true;
+        acceptThread = new Thread(AcceptLoop) { IsBackground = true, Name = "GameServerAccept" };
+        acceptThread.Start();
+        Log("[Servidor] Iniciado en el puerto " + port);
+        return true;
+    }
+
+    public static void StopServer()
+    {
+        if (!running) return;
+        running = false;
+
+        try { listener?.Stop(); } catch (Exception) { }
+        listener = null;
+
+        List<ClientHandler> toClose;
+        lock (stateLock)
+        {
+            toClose = new List<ClientHandler>(clients);
+            clients.Clear();
+            ResetGameState();
+        }
+        foreach (var c in toClose) c.Close();
+
+        Log("[Servidor] Detenido.");
+    }
+
+    private static void AcceptLoop()
+    {
+        while (running)
+        {
+            TcpClient tcp;
+            try
+            {
+                tcp = listener.AcceptTcpClient();
+            }
+            catch (Exception)
+            {
+                break; // listener.Stop() hace que AcceptTcpClient lance excepci√≥n: salimos
+            }
+
+            tcp.NoDelay = true;
 
             ClientHandler handler = null;
             lock (stateLock)
             {
                 if (!gameStarted && clients.Count < MaxPlayers)
                 {
-                    handler = new ClientHandler(tcp, GetFreeSlot());
+                    bool loopback = false;
+                    try { loopback = IPAddress.IsLoopback(((IPEndPoint)tcp.Client.RemoteEndPoint).Address); }
+                    catch (Exception) { }
+
+                    handler = new ClientHandler(tcp, GetFreeSlot(), loopback);
                     clients.Add(handler);
                 }
             }
 
             if (handler == null)
             {
-                Console.WriteLine("ConexiÛn rechazada (partida llena o ya iniciada).");
-                tcp.Close();
+                Log("[Servidor] Conexi√≥n rechazada (sala llena o partida en curso).");
+                try { tcp.Close(); } catch (Exception) { }
                 continue;
             }
 
-            Console.WriteLine("Jugador conectado: slot " + handler.Slot);
-            new Thread(handler.Run) { IsBackground = true }.Start();
+            Log("[Servidor] Jugador conectado: slot " + handler.Slot);
+            new Thread(handler.Run) { IsBackground = true, Name = "Client" + handler.Slot }.Start();
             BroadcastJoinUpdate();
         }
     }
@@ -86,12 +168,20 @@ public class GameServer
         {
             bool used = false;
             foreach (var c in clients)
-            {
                 if (c.Slot == s) { used = true; break; }
-            }
             if (!used) return s;
         }
         return -1;
+    }
+
+    // El host es el primer cliente conectado desde el mismo celular (127.0.0.1).
+    // Si no hay ninguno (servidor de consola), el host es el primero que se conect√≥.
+    // Se llama dentro de stateLock
+    private static ClientHandler GetHost()
+    {
+        foreach (var c in clients)
+            if (c.IsLoopback) return c;
+        return clients.Count > 0 ? clients[0] : null;
     }
 
     private static List<ClientHandler> Snapshot()
@@ -107,14 +197,14 @@ public class GameServer
         gameOver = false;
         collectedItemIDs.Clear();
         readySlots.Clear();
-        finalScores.Clear();
 
         if (readyTimer != null) { readyTimer.Dispose(); readyTimer = null; }
         if (gameTimer != null) { gameTimer.Dispose(); gameTimer = null; }
-        if (resultsTimer != null) { resultsTimer.Dispose(); resultsTimer = null; }
     }
 
-    // ---------- EnvÌo ----------
+    // =================================================================================
+    //  Env√≠o
+    // =================================================================================
 
     public static string BuildMessage(string type, string innerJson)
     {
@@ -124,69 +214,112 @@ public class GameServer
 
     public static void Broadcast(string message, ClientHandler except = null)
     {
-        if (!message.EndsWith("\n")) message += "\n";
         foreach (var c in Snapshot())
-        {
             if (c != except) c.Send(message);
-        }
     }
 
-    // Le manda a UN jugador el estado actual del lobby (al entrar al lobby o volver de una partida)
+    private static string F(float v)
+    {
+        return v.ToString("0.##", CultureInfo.InvariantCulture);
+    }
+
+    private static string IntArray(IEnumerable<int> values)
+    {
+        List<string> list = new List<string>();
+        foreach (int v in values) list.Add(v.ToString(CultureInfo.InvariantCulture));
+        return "[" + string.Join(",", list) + "]";
+    }
+
+    private static string FloatArray(IEnumerable<float> values)
+    {
+        List<string> list = new List<string>();
+        foreach (float v in values) list.Add(F(v));
+        return "[" + string.Join(",", list) + "]";
+    }
+
+    private static string JoinJson(ClientHandler target, List<ClientHandler> list, ClientHandler host)
+    {
+        List<int> slots = new List<int>();
+        foreach (var c in list) slots.Add(c.Slot);
+
+        return "{\"playerSlot\":" + target.Slot +
+               ",\"isHost\":" + (target == host ? "true" : "false") +
+               ",\"totalPlayers\":" + list.Count +
+               ",\"minPlayers\":" + MinPlayers +
+               ",\"slots\":" + IntArray(slots) + "}";
+    }
+
+    // Estado del lobby para UN jugador (al entrar al lobby o al volver de una partida)
     private static void SendLobbyState(ClientHandler target)
     {
-        List<ClientHandler> list = Snapshot();
+        List<ClientHandler> list;
+        ClientHandler host;
+        lock (stateLock)
+        {
+            list = new List<ClientHandler>(clients);
+            host = GetHost();
+        }
         if (!list.Contains(target)) return;
 
-        List<string> slotList = new List<string>();
-        foreach (var c in list) slotList.Add(c.Slot.ToString());
+        target.Send(BuildMessage("JOIN_UPDATE", JoinJson(target, list, host)));
 
-        bool isHost = (list[0] == target);
-        string inner = "{\"playerSlot\":" + target.Slot +
-                       ",\"isHost\":" + (isHost ? "true" : "false") +
-                       ",\"totalPlayers\":" + list.Count +
-                       ",\"slots\":[" + string.Join(",", slotList) + "]}";
-        target.Send(BuildMessage("JOIN_UPDATE", inner));
-
+        // Incluye tambi√©n su propio pollo, para que el lobby lo recuerde al volver de una partida
         foreach (var other in list)
-        {
-            if (other == target) continue;
             target.Send(BuildMessage("SET_CHICKEN",
                 "{\"playerSlot\":" + other.Slot + ",\"chickenIndex\":" + other.Chicken + "}"));
-        }
     }
 
-    // Avisa a todos quiÈn est· conectado y quÈ pollo tiene cada uno
     public static void BroadcastJoinUpdate()
     {
-        List<ClientHandler> list = Snapshot();
-
-        List<string> slotList = new List<string>();
-        foreach (var c in list) slotList.Add(c.Slot.ToString());
-        string slotsJson = "[" + string.Join(",", slotList) + "]";
-
-        for (int i = 0; i < list.Count; i++)
+        List<ClientHandler> list;
+        ClientHandler host;
+        lock (stateLock)
         {
-            bool isHost = (i == 0); // El primero en conectarse es el Host
-            string inner = "{\"playerSlot\":" + list[i].Slot +
-                           ",\"isHost\":" + (isHost ? "true" : "false") +
-                           ",\"totalPlayers\":" + list.Count +
-                           ",\"slots\":" + slotsJson + "}";
-            list[i].Send(BuildMessage("JOIN_UPDATE", inner));
+            list = new List<ClientHandler>(clients);
+            host = GetHost();
         }
 
-        // Cada jugador recibe el pollo que ya eligieron los dem·s (asÌ el que entra tarde los ve bien)
         foreach (var target in list)
-        {
+            target.Send(BuildMessage("JOIN_UPDATE", JoinJson(target, list, host)));
+
+        foreach (var target in list)
             foreach (var other in list)
-            {
-                if (other == target) continue;
-                string inner = "{\"playerSlot\":" + other.Slot + ",\"chickenIndex\":" + other.Chicken + "}";
-                target.Send(BuildMessage("SET_CHICKEN", inner));
-            }
-        }
+                target.Send(BuildMessage("SET_CHICKEN",
+                    "{\"playerSlot\":" + other.Slot + ",\"chickenIndex\":" + other.Chicken + "}"));
     }
 
-    // ---------- Mensajes entrantes ----------
+    // Puntajes de todos (para el ranking del HUD)
+    private static string BuildScoreUpdate()
+    {
+        List<int> slots = new List<int>(), scores = new List<int>(), items = new List<int>();
+        lock (stateLock)
+        {
+            foreach (var c in clients)
+            {
+                slots.Add(c.Slot);
+                scores.Add(c.Score);
+                items.Add(c.Items);
+            }
+        }
+        return BuildMessage("SCORE_UPDATE",
+            "{\"slots\":" + IntArray(slots) + ",\"scores\":" + IntArray(scores) + ",\"items\":" + IntArray(items) + "}");
+    }
+
+    // Cargas de power-up de UN jugador
+    private static void SendCharges(ClientHandler c)
+    {
+        int speed, freeze;
+        lock (stateLock)
+        {
+            speed = c.SpeedCharges;
+            freeze = c.FreezeCharges;
+        }
+        c.Send(BuildMessage("CHARGES", "{\"speedCharges\":" + speed + ",\"freezeCharges\":" + freeze + "}"));
+    }
+
+    // =================================================================================
+    //  Mensajes entrantes
+    // =================================================================================
 
     public static void HandleMessage(ClientHandler from, string line)
     {
@@ -196,16 +329,13 @@ public class GameServer
         switch (typeMatch.Groups[1].Value)
         {
             case "SET_CHICKEN":
+                if (TryReadInt(line, "chickenIndex", out int chicken) && chicken >= 0 && chicken < 100)
                 {
-                    if (TryReadInt(line, "chickenIndex", out int chicken) && chicken >= 0 && chicken < 100)
-                    {
-                        from.Chicken = chicken;
-                        // El slot lo pone el servidor
-                        string inner = "{\"playerSlot\":" + from.Slot + ",\"chickenIndex\":" + chicken + "}";
-                        Broadcast(BuildMessage("SET_CHICKEN", inner));
-                    }
-                    break;
+                    from.Chicken = chicken;
+                    Broadcast(BuildMessage("SET_CHICKEN",
+                        "{\"playerSlot\":" + from.Slot + ",\"chickenIndex\":" + chicken + "}"));
                 }
+                break;
 
             case "LOBBY_REFRESH":
                 SendLobbyState(from);
@@ -230,96 +360,88 @@ public class GameServer
                     break;
                 }
 
-            case "PICKUP_ITEM":
+            case "MOVE":
+                if (TryReadFloat(line, "posX", out float x) && TryReadFloat(line, "posY", out float y))
                 {
-                    if (TryReadInt(line, "itemID", out int itemID) && TryReadString(line, "itemType", out string itemType))
-                        ProcessPickupRequest(from.Slot, itemID, itemType);
-                    break;
+                    float limit = MatchGenerator.MapHalfSize;
+                    x = Math.Max(-limit, Math.Min(limit, x));
+                    y = Math.Max(-limit, Math.Min(limit, y));
+                    lock (stateLock)
+                    {
+                        from.PosX = x;
+                        from.PosY = y;
+                    }
+                    Broadcast(BuildMessage("MOVE",
+                        "{\"playerSlot\":" + from.Slot + ",\"posX\":" + F(x) + ",\"posY\":" + F(y) + "}"), from);
                 }
+                break;
+
+            case "PICKUP_ITEM":
+                if (TryReadInt(line, "itemID", out int itemID))
+                    ProcessPickupRequest(from, itemID);
+                break;
 
             case "USE_POWERUP":
-                {
-                    bool active;
-                    lock (stateLock) { active = gameBegan && !gameOver; }
-
-                    if (active && TryReadString(line, "powerUpType", out string powerUp) && powerUp == "FREEZE")
-                    {
-                        // El slot lo pone el servidor, para que nadie pueda suplantar a otro jugador
-                        string inner = "{\"senderSlot\":" + from.Slot + ",\"targetSlot\":-1,\"powerUpType\":\"FREEZE\"}";
-                        Console.WriteLine("Jugador " + from.Slot + " usÛ HIELO");
-                        Broadcast(BuildMessage("USE_POWERUP", inner), from);
-                    }
-                    break;
-                }
-
-            case "MOVE":
-                {
-                    if (TryReadFloat(line, "posX", out float x) && TryReadFloat(line, "posY", out float y))
-                    {
-                        string inner = "{\"playerSlot\":" + from.Slot +
-                                       ",\"posX\":" + x.ToString(CultureInfo.InvariantCulture) +
-                                       ",\"posY\":" + y.ToString(CultureInfo.InvariantCulture) + "}";
-                        Broadcast(BuildMessage("MOVE", inner), from);
-                    }
-                    break;
-                }
-
-            case "FINAL_SCORE":
-                {
-                    bool allScores = false;
-                    if (TryReadInt(line, "score", out int score))
-                    {
-                        lock (stateLock)
-                        {
-                            if (gameOver && !resultsSent)
-                            {
-                                finalScores[from.Slot] = score;
-                                allScores = finalScores.Count >= clients.Count;
-                            }
-                        }
-                    }
-                    if (allScores) SendResults();
-                    break;
-                }
+                if (TryReadString(line, "powerUpType", out string powerUp))
+                    ProcessPowerUp(from, powerUp);
+                break;
         }
     }
 
-    // ---------- Ciclo de la partida ----------
+    // =================================================================================
+    //  Ciclo de la partida
+    // =================================================================================
 
     private static void StartGame(ClientHandler from)
     {
         string message;
         lock (stateLock)
         {
-            // Solo el host puede iniciar, y solo una vez
-            if (gameStarted || clients.Count == 0 || clients[0] != from) return;
+            // Solo el host, una sola vez, y con el m√≠nimo de jugadores
+            if (gameStarted || from != GetHost()) return;
+            if (clients.Count < MinPlayers || clients.Count > MaxPlayers)
+            {
+                Log("[Servidor] No se puede iniciar: hay " + clients.Count + " jugador(es), m√≠nimo " + MinPlayers);
+                return;
+            }
 
             ResetGameState();
             gameStarted = true;
-            resultsSent = false;
 
-            int seed = rng.Next();
-            List<string> slots = new List<string>();
-            List<string> chickens = new List<string>();
-            foreach (var c in clients)
+            int count = clients.Count;
+            float[] spawnX = new float[count];
+            float[] spawnY = new float[count];
+            MatchGenerator.GenerateSpawns(rng, count, spawnX, spawnY);
+            MatchGenerator.GenerateItems(rng, itemX, itemY, itemT, spawnX, spawnY, count);
+
+            List<int> slots = new List<int>(), chickens = new List<int>();
+            for (int i = 0; i < count; i++)
             {
-                slots.Add(c.Slot.ToString());
-                chickens.Add(c.Chicken.ToString());
+                ClientHandler c = clients[i];
+                c.ResetMatchStats();
+                c.PosX = spawnX[i];
+                c.PosY = spawnY[i];
+                slots.Add(c.Slot);
+                chickens.Add(c.Chicken);
             }
 
-            string inner = "{\"seed\":" + seed +
-                           ",\"slots\":[" + string.Join(",", slots) + "]" +
-                           ",\"chickens\":[" + string.Join(",", chickens) + "]}";
+            string inner = "{\"slots\":" + IntArray(slots) +
+                           ",\"chickens\":" + IntArray(chickens) +
+                           ",\"spawnX\":" + FloatArray(spawnX) +
+                           ",\"spawnY\":" + FloatArray(spawnY) +
+                           ",\"itemX\":" + FloatArray(itemX) +
+                           ",\"itemY\":" + FloatArray(itemY) +
+                           ",\"itemT\":" + IntArray(itemT) +
+                           ",\"duration\":" + GameDurationSeconds + "}";
             message = BuildMessage("START_GAME", inner);
 
-            // Si alg˙n cliente tarda demasiado en cargar, se empieza igual
+            // Si alg√∫n celular tarda demasiado en cargar, se empieza igual
             readyTimer = new Timer(_ => BeginGame(), null, ReadyTimeoutMs, Timeout.Infinite);
-            Console.WriteLine("°Partida iniciada! Jugadores: " + clients.Count + " | semilla: " + seed);
+            Log("[Servidor] ¬°Partida iniciada! Jugadores: " + count);
         }
         Broadcast(message);
     }
 
-    // Todos cargaron la escena: arranca el reloj para todos al mismo tiempo
     private static void BeginGame()
     {
         lock (stateLock)
@@ -331,111 +453,214 @@ public class GameServer
             gameTimer = new Timer(_ => EndGame(), null, GameDurationSeconds * 1000, Timeout.Infinite);
         }
 
-        Console.WriteLine("°Comienza la cuenta de " + GameDurationSeconds + " segundos!");
+        Log("[Servidor] Comienza la cuenta de " + GameDurationSeconds + " s");
         Broadcast(BuildMessage("GAME_BEGIN", "{\"duration\":" + GameDurationSeconds + "}"));
+        Broadcast(BuildScoreUpdate());
     }
 
     private static void EndGame()
     {
+        string results;
         lock (stateLock)
         {
             if (!gameBegan || gameOver) return;
             gameOver = true;
+            results = BuildResults();
 
-            // Si alg˙n cliente no manda su puntaje, se muestran resultados igual
-            resultsTimer = new Timer(_ => SendResults(), null, ResultsTimeoutMs, Timeout.Infinite);
-        }
-
-        Console.WriteLine("Se acabÛ el tiempo.");
-        Broadcast(BuildMessage("GAME_OVER", "{}"));
-    }
-
-    private static void SendResults()
-    {
-        string message;
-        lock (stateLock)
-        {
-            if (!gameOver || resultsSent) return;
-            resultsSent = true;
-
-            List<string> slots = new List<string>();
-            List<string> scores = new List<string>();
-            foreach (var c in clients)
-            {
-                int s;
-                if (!finalScores.TryGetValue(c.Slot, out s)) s = 0;
-                slots.Add(c.Slot.ToString());
-                scores.Add(s.ToString());
-            }
-
-            message = BuildMessage("RESULTS",
-                "{\"slots\":[" + string.Join(",", slots) + "],\"scores\":[" + string.Join(",", scores) + "]}");
-
-            // Queda listo para jugar otra ronda con los mismos jugadores
+            // Queda listo para otra ronda con los mismos jugadores
             ResetGameState();
         }
 
-        Console.WriteLine("Resultados enviados.");
-        Broadcast(message);
+        Log("[Servidor] Se acab√≥ el tiempo.");
+        Broadcast(BuildMessage("GAME_OVER", "{}"));
+        Broadcast(results);
     }
 
-    // RESOLUCI”N FIFO: el primer jugador cuya peticiÛn llega al servidor gana el maÌz
-    private static void ProcessPickupRequest(int playerSlot, int itemID, string itemType)
+    // Ranking final. Regla de desempate: 1) mayor puntaje, 2) m√°s ma√≠ces especiales.
+    // Si siguen empatados -> VICTORIA COMPARTIDA (todos los empatados son ganadores).
+    // Se llama dentro de stateLock
+    private static string BuildResults()
     {
-        if (itemID < 0 || itemID >= TotalItems) return;
-        if (!validItemTypes.Contains(itemType)) return;
+        List<ClientHandler> ranking = new List<ClientHandler>(clients);
+        ranking.Sort((a, b) =>
+        {
+            int byScore = b.Score.CompareTo(a.Score);
+            return byScore != 0 ? byScore : b.Specials.CompareTo(a.Specials);
+        });
 
+        List<int> slots = new List<int>(), scores = new List<int>(), items = new List<int>(),
+                  specials = new List<int>(), winners = new List<int>();
+
+        for (int i = 0; i < ranking.Count; i++)
+        {
+            ClientHandler c = ranking[i];
+            bool isWinner = c.Score == ranking[0].Score && c.Specials == ranking[0].Specials;
+
+            slots.Add(c.Slot);
+            scores.Add(c.Score);
+            items.Add(c.Items);
+            specials.Add(c.Specials);
+            winners.Add(isWinner ? 1 : 0);
+        }
+
+        return BuildMessage("RESULTS",
+            "{\"slots\":" + IntArray(slots) +
+            ",\"scores\":" + IntArray(scores) +
+            ",\"items\":" + IntArray(items) +
+            ",\"specials\":" + IntArray(specials) +
+            ",\"winners\":" + IntArray(winners) + "}");
+    }
+
+    // RESOLUCI√ìN DE CONFLICTOS: el primer pedido que llega al servidor se queda con el ma√≠z.
+    private static void ProcessPickupRequest(ClientHandler from, int itemID)
+    {
+        if (itemID < 0 || itemID >= MatchGenerator.TotalItems) return;
+
+        int type;
+        bool chargeChanged = false;
         lock (stateLock)
         {
             if (!gameBegan || gameOver) return;
-            if (!collectedItemIDs.Add(itemID)) return; // Ya lo recogiÛ otro
+            if (collectedItemIDs.Contains(itemID)) return;          // ya lo recogi√≥ otro
+            if (DateTime.UtcNow < from.FrozenUntil) return;          // congelado no recoge
+
+            float dx = itemX[itemID] - from.PosX;
+            float dy = itemY[itemID] - from.PosY;
+            if (Math.Sqrt(dx * dx + dy * dy) > MaxPickupDistance) return; // demasiado lejos
+
+            collectedItemIDs.Add(itemID);
+            type = itemT[itemID];
+
+            from.Items++;
+            if (type == MatchGenerator.TypeNormal)
+            {
+                from.Score += PointsNormal;
+            }
+            else
+            {
+                from.Score += PointsSpecial;
+                from.Specials++;
+
+                if (type == MatchGenerator.TypeSpeed && from.SpeedCharges < MaxCharges)
+                {
+                    from.SpeedCharges++;
+                    chargeChanged = true;
+                }
+                else if (type == MatchGenerator.TypeFreeze && from.FreezeCharges < MaxCharges)
+                {
+                    from.FreezeCharges++;
+                    chargeChanged = true;
+                }
+            }
         }
 
-        Console.WriteLine("Jugador " + playerSlot + " recogiÛ el Ìtem " + itemID + " (" + itemType + ")");
+        Broadcast(BuildMessage("ITEM_PICKED_UP",
+            "{\"playerSlot\":" + from.Slot + ",\"itemID\":" + itemID + ",\"itemType\":" + type + "}"));
+        Broadcast(BuildScoreUpdate());
+        if (chargeChanged) SendCharges(from);
+    }
 
-        string inner = "{\"playerSlot\":" + playerSlot + ",\"itemID\":" + itemID + ",\"itemType\":\"" + itemType + "\"}";
-        Broadcast(BuildMessage("ITEM_PICKED_UP", inner)); // A TODOS, incluido el ganador
+    // SPEED: turbo para quien lo usa. FREEZE: congela al rival M√ÅS CERCANO que no est√© congelado.
+    private static void ProcessPowerUp(ClientHandler from, string powerUp)
+    {
+        string message = null;
+        lock (stateLock)
+        {
+            if (!gameBegan || gameOver) return;
+
+            DateTime now = DateTime.UtcNow;
+            if (now < from.NextPowerUpTime || now < from.FrozenUntil)
+            {
+                // No se puede usar todav√≠a: igual le reenviamos sus cargas para que el HUD quede bien
+            }
+            else if (powerUp == "SPEED" && from.SpeedCharges > 0)
+            {
+                from.SpeedCharges--;
+                from.NextPowerUpTime = now.AddSeconds(PowerUpCooldown);
+                message = BuildPowerUpMessage(from.Slot, from.Slot, "SPEED", SpeedDuration);
+                Log("[Servidor] Jugador " + from.Slot + " us√≥ TURBO");
+            }
+            else if (powerUp == "FREEZE" && from.FreezeCharges > 0)
+            {
+                ClientHandler target = FindNearestRival(from, now);
+                if (target != null)
+                {
+                    from.FreezeCharges--;
+                    from.NextPowerUpTime = now.AddSeconds(PowerUpCooldown);
+                    target.FrozenUntil = now.AddSeconds(FreezeDuration);
+                    message = BuildPowerUpMessage(from.Slot, target.Slot, "FREEZE", FreezeDuration);
+                    Log("[Servidor] Jugador " + from.Slot + " congel√≥ al jugador " + target.Slot);
+                }
+            }
+        }
+
+        if (message != null) Broadcast(message);
+        SendCharges(from);
+    }
+
+    // Se llama dentro de stateLock
+    private static ClientHandler FindNearestRival(ClientHandler from, DateTime now)
+    {
+        ClientHandler best = null;
+        float bestDist = float.MaxValue;
+        foreach (var c in clients)
+        {
+            if (c == from || now < c.FrozenUntil) continue;
+            float dx = c.PosX - from.PosX;
+            float dy = c.PosY - from.PosY;
+            float d = dx * dx + dy * dy;
+            if (d < bestDist)
+            {
+                bestDist = d;
+                best = c;
+            }
+        }
+        return best;
+    }
+
+    private static string BuildPowerUpMessage(int sender, int target, string type, float duration)
+    {
+        return BuildMessage("POWERUP_USED",
+            "{\"senderSlot\":" + sender + ",\"targetSlot\":" + target +
+            ",\"powerUpType\":\"" + type + "\",\"duration\":" + F(duration) + "}");
     }
 
     public static void RemoveClient(ClientHandler handler)
     {
         bool wasStarted;
         bool shouldBegin = false;
-        bool shouldSendResults = false;
 
         lock (stateLock)
         {
             if (!clients.Remove(handler)) return;
             wasStarted = gameStarted;
-
             readySlots.Remove(handler.Slot);
-            finalScores.Remove(handler.Slot);
 
             if (clients.Count == 0)
-            {
-                // Si no queda nadie, el servidor queda listo para una partida nueva
                 ResetGameState();
-            }
             else if (gameStarted)
-            {
-                // Quiz· los que quedan ya estaban todos listos / ya habÌan enviado su puntaje
                 shouldBegin = !gameBegan && readySlots.Count >= clients.Count;
-                shouldSendResults = gameOver && finalScores.Count >= clients.Count;
-            }
         }
 
         handler.Close();
-        Console.WriteLine("Jugador " + handler.Slot + " desconectado.");
+        Log("[Servidor] Jugador " + handler.Slot + " desconectado.");
 
-        if (wasStarted) Broadcast(BuildMessage("PLAYER_LEFT", "{\"playerSlot\":" + handler.Slot + "}"));
-        else BroadcastJoinUpdate();
+        if (wasStarted)
+        {
+            Broadcast(BuildMessage("PLAYER_LEFT", "{\"playerSlot\":" + handler.Slot + "}"));
+            Broadcast(BuildScoreUpdate());
+        }
+        else
+        {
+            BroadcastJoinUpdate();
+        }
 
         if (shouldBegin) BeginGame();
-        if (shouldSendResults) SendResults();
     }
 
-    // ---------- Lectura de campos dentro del JSON ----------
-    // Funcionan tanto con comillas normales como escapadas (\"), que es como llega el payload
+    // =================================================================================
+    //  Lectura de campos del JSON (funciona con comillas normales y escapadas \")
+    // =================================================================================
 
     private static bool TryReadInt(string line, string key, out int value)
     {
@@ -459,20 +684,40 @@ public class GameServer
     }
 }
 
+// =====================================================================================
+//  Un jugador conectado al servidor
+// =====================================================================================
 public class ClientHandler
 {
     public readonly int Slot;
-    public int Chicken = 0; // Õndice del pollo que eligiÛ en el lobby
+    public readonly bool IsLoopback;
+    public int Chicken = 0;
+
+    // Datos de la partida (los protege el stateLock del GameServer)
+    public float PosX, PosY;
+    public int Score, Items, Specials;
+    public int SpeedCharges, FreezeCharges;
+    public DateTime NextPowerUpTime = DateTime.MinValue;
+    public DateTime FrozenUntil = DateTime.MinValue;
 
     private readonly TcpClient client;
     private readonly NetworkStream stream;
     private readonly object sendLock = new object();
 
-    public ClientHandler(TcpClient client, int slot)
+    public ClientHandler(TcpClient client, int slot, bool isLoopback)
     {
         this.client = client;
         Slot = slot;
+        IsLoopback = isLoopback;
         stream = client.GetStream();
+    }
+
+    public void ResetMatchStats()
+    {
+        Score = Items = Specials = 0;
+        SpeedCharges = FreezeCharges = 0;
+        NextPowerUpTime = DateTime.MinValue;
+        FrozenUntil = DateTime.MinValue;
     }
 
     public void Run()
@@ -489,7 +734,7 @@ public class ClientHandler
         }
         catch (Exception)
         {
-            // ConexiÛn cortada: se limpia en el finally
+            // Conexi√≥n cortada: se limpia en el finally
         }
         finally
         {
@@ -506,7 +751,7 @@ public class ClientHandler
         }
         catch (Exception)
         {
-            // Si falla el envÌo, el hilo de lectura detecta la caÌda y lo elimina
+            // Si falla, el hilo de lectura detecta la ca√≠da y lo elimina
         }
     }
 
@@ -515,3 +760,19 @@ public class ClientHandler
         try { client.Close(); } catch (Exception) { }
     }
 }
+
+#if !UNITY_5_3_OR_NEWER
+// Solo se compila FUERA de Unity (si quieren correr el servidor en un PC como consola).
+// Dentro de Unity no existe este Main: el servidor lo arranca MainMenuManager.
+public static class ServerProgram
+{
+    public static void Main(string[] args)
+    {
+        if (args.Length > 0 && args[0] == "--solo") GameServer.MinPlayers = 1;
+        GameServer.StartServer();
+        Console.WriteLine("Presiona ENTER para detener el servidor.");
+        Console.ReadLine();
+        GameServer.StopServer();
+    }
+}
+#endif

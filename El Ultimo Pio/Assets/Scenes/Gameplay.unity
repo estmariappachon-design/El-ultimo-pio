@@ -813,6 +813,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PlayerController
   moveSpeed: 8
+  turboMultiplier: 1.7
   mapHalfSize: 50
   edgeMargin: 3
   playerSlot: 0
@@ -1732,14 +1733,13 @@ MonoBehaviour:
   maizCongelarPrefab: {fileID: 3828586397003485989, guid: 73db306629e79da4e9fa59d5f500d17b, type: 3}
   timerText: {fileID: 3017065176447481218}
   scoreText: {fileID: 3017065176447481219}
+  scoreFormat: "{0} pts  |  {1} ma\xEDces"
+  rankingText: {fileID: 0}
+  statusText: {fileID: 0}
   btnTurbo: {fileID: 1364471704}
   btnCongelar: {fileID: 2055164267}
   buttonOnColor: {r: 1, g: 1, b: 1, a: 1}
   buttonOffColor: {r: 0.38679248, g: 0.38679248, b: 0.38679248, a: 0.5}
-  turboDuration: 5
-  freezeDuration: 4
-  freezeBonusPoints: 2
-  freezePenaltyPoints: 2
   chickenSprites:
   - {fileID: 21300000, guid: af4a32ec58324e0479a25b673c74fcf6, type: 3}
   - {fileID: 21300000, guid: 90ab777b7d0aef544bd86a8af4336642, type: 3}
@@ -1750,17 +1750,20 @@ MonoBehaviour:
   - {fileID: 21300000, guid: a4f24d0fb7073fe4badb9fc0479fe9f9, type: 3}
   - {fileID: 21300000, guid: b2fca188448daec41942be8e88a16d60, type: 3}
   - {fileID: 21300000, guid: 12504e53d00bcf741b1be82785af2e29, type: 3}
-  lobbySceneName: Lobby
-  startPositions:
-  - {x: -6, y: -6}
-  - {x: 6, y: -6}
-  - {x: -6, y: 6}
-  - {x: 6, y: 6}
   playerColors:
   - {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
   - {r: 0, g: 1, b: 1, a: 1}
   - {r: 0, g: 1, b: 0, a: 1}
   - {r: 1, g: 0.5, b: 0, a: 1}
+  nameLabelHeight: 4
+  lobbySceneName: Lobby
+  mainMenuSceneName: MainMenu
+  pickupClip: {fileID: 8300000, guid: b79b0eb03773e82438cb2873dd2cc761, type: 3}
+  specialClip: {fileID: 8300000, guid: 6a9b8d0f8d0b362428cd0a4f063f6de5, type: 3}
+  turboClip: {fileID: 8300000, guid: 783fcfbc800f6f143ae62ab3d1e310e8, type: 3}
+  freezeClip: {fileID: 8300000, guid: ee77b23f2ad9e914490328d1e4814556, type: 3}
+  frozenClip: {fileID: 8300000, guid: ee77b23f2ad9e914490328d1e4814556, type: 3}
+  endClip: {fileID: 8300000, guid: 89eb6835b01d2e14db00ee6e99606d2e, type: 3}
 --- !u!1 &1605362136
 GameObject:
   m_ObjectHideFlags: 0
