@@ -19,6 +19,14 @@ public class MainMenuManager : MonoBehaviour
     [Tooltip("Permite que el host empiece la partida estando solo. DESACTIVAR antes de grabar el video.")]
     [SerializeField] private bool allowSoloForTesting = false;
 
+    [Header("Maíces especiales (los aplica el anfitrión al crear la sala)")]
+    [Tooltip("Cuántos maíces de VELOCIDAD hay en el mapa (de los 50)")]
+    [SerializeField, Range(0, 15)] private int speedCornCount = 3;
+    [Tooltip("Cuántos maíces de HIELO hay en el mapa (de los 50)")]
+    [SerializeField, Range(0, 15)] private int freezeCornCount = 3;
+    [Tooltip("Segundos que tarda un maíz especial en reaparecer después de que lo cogen (0 = al instante)")]
+    [SerializeField, Range(0f, 60f)] private float specialRespawnDelay = 15f;
+
     private const string LastIPKey = "ultima_ip";
 
     private void Start()
@@ -59,6 +67,9 @@ public class MainMenuManager : MonoBehaviour
         GameServer.StopServer();
 
         GameServer.MinPlayers = allowSoloForTesting ? 1 : 2;
+        MatchGenerator.SpeedItems = speedCornCount;
+        MatchGenerator.FreezeItems = freezeCornCount;
+        GameServer.SpecialRespawnDelay = specialRespawnDelay;
 
         if (!GameServer.StartServer(GameServer.DefaultPort))
         {

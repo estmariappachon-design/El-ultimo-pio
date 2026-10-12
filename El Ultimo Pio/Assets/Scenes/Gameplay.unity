@@ -1834,7 +1834,7 @@ MonoBehaviour:
   turboClip: {fileID: 8300000, guid: 783fcfbc800f6f143ae62ab3d1e310e8, type: 3}
   freezeClip: {fileID: 8300000, guid: ee77b23f2ad9e914490328d1e4814556, type: 3}
   frozenClip: {fileID: 8300000, guid: ee77b23f2ad9e914490328d1e4814556, type: 3}
-  endClip: {fileID: 8300000, guid: 89eb6835b01d2e14db00ee6e99606d2e, type: 3}
+  endClip: {fileID: 8300000, guid: 6e6e7fc1c587a9e479d24e5546ea5955, type: 3}
 --- !u!1 &1605362136
 GameObject:
   m_ObjectHideFlags: 0

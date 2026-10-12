@@ -1043,6 +1043,7 @@ public class GameManager : MonoBehaviour
         nav.mode = Navigation.Mode.None;
         b.navigation = nav;
         b.onClick.AddListener(action);
+        AudioManager.AddClickSound(b);
 
         // Ver las zonas tocables para cuadrarlas con los dibujos
         if (showButtonAreas) cb.normalColor = new Color(1f, 0f, 0f, 0.35f);
@@ -1092,6 +1093,7 @@ public class GameManager : MonoBehaviour
         b.targetGraphic = img;
         b.onClick.AddListener(action);
         btnObj.AddComponent<UIButtonFeedback>();
+        AudioManager.AddClickSound(b);
 
         TextMeshProUGUI t = CreateUIText(btnObj.transform, "Texto", new Vector2(0.5f, 0.5f), Vector2.zero,
             new Vector2(440f, 110f), 40f, TextAlignmentOptions.Center);

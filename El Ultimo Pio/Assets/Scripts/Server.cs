@@ -41,7 +41,8 @@ public static class GameServer
     public static float FreezeDuration = 3f;        // segundos congelado (doc: 2 a 4)
     public static float PowerUpCooldown = 2f;       // segundos entre usos de power-ups
     public static float MaxPickupDistance = 6f;     // validación anti-trampa del servidor
-    public static bool RespawnItems = true;         // el maíz recogido reaparece en otro lugar (siempre hay 50)
+    public static bool RespawnItems = true;         // el maíz recogido reaparece en otro lugar
+    public static float SpecialRespawnDelay = 15f;  // segundos que tarda en reaparecer un maíz ESPECIAL (0 = al instante)
 
     private const int ReadyTimeoutMs = 15000;
 
@@ -69,6 +70,8 @@ public static class GameServer
 
     private static Timer readyTimer;
     private static Timer gameTimer;
+    private static readonly List<Timer> respawnTimers = new List<Timer>(); // reaparición con retraso
+    private static int matchId = 0; // evita que un temporizador de la partida anterior afecte a la nueva
 
     public static bool IsRunning => running;
 
@@ -201,6 +204,9 @@ public static class GameServer
 
         if (readyTimer != null) { readyTimer.Dispose(); readyTimer = null; }
         if (gameTimer != null) { gameTimer.Dispose(); gameTimer = null; }
+        foreach (Timer t in respawnTimers) t.Dispose();
+        respawnTimers.Clear();
+        matchId++;
     }
 
     // =================================================================================
@@ -534,17 +540,20 @@ public static class GameServer
 
             if (RespawnItems)
             {
-                // Se mueve a otro lugar con el MISMO tipo: el mapa nunca se queda sin maíces
-                // y siempre hay la misma cantidad de maíces especiales.
-                float[] px = new float[clients.Count], py = new float[clients.Count];
-                for (int k = 0; k < clients.Count; k++) { px[k] = clients[k].PosX; py[k] = clients[k].PosY; }
-
-                MatchGenerator.RandomRespawnPosition(rng, itemID, itemX, itemY, MatchGenerator.TotalItems,
-                                                     px, py, clients.Count, out float nx, out float ny);
-                itemX[itemID] = nx;
-                itemY[itemID] = ny;
-                respawnMessage = BuildMessage("ITEM_SPAWNED",
-                    "{\"itemID\":" + itemID + ",\"posX\":" + F(nx) + ",\"posY\":" + F(ny) + ",\"itemType\":" + type + "}");
+                bool special = type != MatchGenerator.TypeNormal;
+                if (special && SpecialRespawnDelay > 0f)
+                {
+                    // Los especiales desaparecen un rato: así salen menos seguido
+                    collectedItemIDs.Add(itemID);
+                    int id = itemID, match = matchId;
+                    Timer t = new Timer(_ => DelayedRespawn(id, match), null, (int)(SpecialRespawnDelay * 1000f), Timeout.Infinite);
+                    respawnTimers.Add(t);
+                }
+                else
+                {
+                    // Los normales reaparecen al instante en otro lugar: el mapa nunca se queda vacío
+                    respawnMessage = RelocateItem(itemID);
+                }
             }
             else
             {
@@ -579,6 +588,35 @@ public static class GameServer
         if (respawnMessage != null) Broadcast(respawnMessage);
         Broadcast(BuildScoreUpdate());
         if (chargeChanged) SendCharges(from);
+    }
+
+    // Mueve el maíz a un lugar nuevo (lejos de los pollos) y devuelve el mensaje ITEM_SPAWNED.
+    // Se llama dentro de stateLock
+    private static string RelocateItem(int itemID)
+    {
+        float[] px = new float[clients.Count], py = new float[clients.Count];
+        for (int k = 0; k < clients.Count; k++) { px[k] = clients[k].PosX; py[k] = clients[k].PosY; }
+
+        MatchGenerator.RandomRespawnPosition(rng, itemID, itemX, itemY, MatchGenerator.TotalItems,
+                                             px, py, clients.Count, out float nx, out float ny);
+        itemX[itemID] = nx;
+        itemY[itemID] = ny;
+        collectedItemIDs.Remove(itemID);
+
+        return BuildMessage("ITEM_SPAWNED",
+            "{\"itemID\":" + itemID + ",\"posX\":" + F(nx) + ",\"posY\":" + F(ny) + ",\"itemType\":" + itemT[itemID] + "}");
+    }
+
+    // Reaparición de un maíz especial después de SpecialRespawnDelay segundos
+    private static void DelayedRespawn(int itemID, int match)
+    {
+        string message;
+        lock (stateLock)
+        {
+            if (match != matchId || !gameBegan || gameOver) return; // la partida ya terminó
+            message = RelocateItem(itemID);
+        }
+        Broadcast(message);
     }
 
     // SPEED: turbo para quien lo usa. FREEZE: congela al rival MÁS CERCANO que no esté congelado.

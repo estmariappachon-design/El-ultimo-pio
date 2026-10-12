@@ -11,8 +11,8 @@ public static class MatchGenerator
     public const float SpawnArea = 40f;    // los pollos aparecen entre -40 y 40
 
     public const int TotalItems = 50;
-    public const int SpeedItems = 6;       // maíces arcoíris (turbo)
-    public const int FreezeItems = 6;      // maíces de hielo (congelar)
+    public static int SpeedItems = 3;      // maíces arcoíris (turbo) en el mapa (lo cambia MainMenuManager)
+    public static int FreezeItems = 3;     // maíces de hielo (congelar) en el mapa
 
     public const float MinDistanceBetweenPlayers = 25f;
     public const float MinDistanceBetweenItems = 4f;
