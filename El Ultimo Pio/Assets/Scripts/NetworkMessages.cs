@@ -80,6 +80,15 @@ public class ItemPickedPayload
 }
 
 [Serializable]
+public class ItemSpawnedPayload
+{
+    public int itemID;
+    public float posX;
+    public float posY;
+    public int itemType;
+}
+
+[Serializable]
 public class ScoreUpdatePayload
 {
     public int[] slots;

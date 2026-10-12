@@ -971,8 +971,8 @@ Transform:
   m_GameObject: {fileID: 499788533}
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: 0, y: 401, z: 0}
-  m_LocalScale: {x: 10, y: 10, z: 10}
+  m_LocalPosition: {x: -751.72, y: 394.93, z: 643.99994}
+  m_LocalScale: {x: 7.1642585, y: 7.1642585, z: 7.1642585}
   m_ConstrainProportionsScale: 1
   m_Children: []
   m_Father: {fileID: 3017065176447481220}
@@ -1100,7 +1100,7 @@ RectTransform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 503221622}
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: -2.97}
+  m_LocalPosition: {x: 0, y: 0, z: 27.5}
   m_LocalScale: {x: 0.102219455, y: 0.102219455, z: 0.102219455}
   m_ConstrainProportionsScale: 0
   m_Children:
@@ -1152,7 +1152,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: -773, y: -206}
+  m_AnchoredPosition: {x: -736, y: -206}
   m_SizeDelta: {x: 350, y: 350}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &529858919
@@ -1740,22 +1740,93 @@ MonoBehaviour:
   btnCongelar: {fileID: 2055164267}
   buttonOnColor: {r: 1, g: 1, b: 1, a: 1}
   buttonOffColor: {r: 0.38679248, g: 0.38679248, b: 0.38679248, a: 0.5}
-  chickenSprites:
-  - {fileID: 21300000, guid: af4a32ec58324e0479a25b673c74fcf6, type: 3}
-  - {fileID: 21300000, guid: 90ab777b7d0aef544bd86a8af4336642, type: 3}
-  - {fileID: 21300000, guid: 5db908c910e01ad44829b73e569715e0, type: 3}
-  - {fileID: 21300000, guid: 3616b213c42b4d042adc6f8cce9673e4, type: 3}
-  - {fileID: 21300000, guid: 75a26eb65dd40e64d885123f03e5d331, type: 3}
-  - {fileID: 21300000, guid: 5d6dd9cb34a188a40af63f179de56538, type: 3}
-  - {fileID: 21300000, guid: a4f24d0fb7073fe4badb9fc0479fe9f9, type: 3}
-  - {fileID: 21300000, guid: b2fca188448daec41942be8e88a16d60, type: 3}
-  - {fileID: 21300000, guid: 12504e53d00bcf741b1be82785af2e29, type: 3}
+  chickenSkins:
+  - name: Pollo1
+    normal: {fileID: 21300000, guid: 7f7b1f7a3aa94814ea376e0d3acdf266, type: 3}
+    speed: {fileID: 21300000, guid: 119becd681f3b7b48b2414d0683098d2, type: 3}
+    frozen: {fileID: 21300000, guid: e325610e179930b4396cf7301c9536a7, type: 3}
+  - name: Pollo5
+    normal: {fileID: 21300000, guid: 302c2822ba524dc498d2c6839a85273d, type: 3}
+    speed: {fileID: 21300000, guid: c26989f507a4cdb4cafef6b3bbb7b89f, type: 3}
+    frozen: {fileID: 21300000, guid: 0036243f257b0b74daf99bd435af6685, type: 3}
+  - name: Pollo8
+    normal: {fileID: 21300000, guid: 543e96ccf0b9b56408b0d5606da6c7bd, type: 3}
+    speed: {fileID: 21300000, guid: d336d8452d9ef654c899bfa1fee3aed5, type: 3}
+    frozen: {fileID: 21300000, guid: 0ba9c941b25cde0468b03dda970a7e8e, type: 3}
+  - name: Pollo9
+    normal: {fileID: 21300000, guid: f7da49f086c8c26498ba3ff420e8e17c, type: 3}
+    speed: {fileID: 21300000, guid: 2de7e55a8f1cedc4b8ab0ff8c501d449, type: 3}
+    frozen: {fileID: 21300000, guid: 949fa306172392f40b5317aa50a23620, type: 3}
+  - name: Pollo4
+    normal: {fileID: 21300000, guid: e94c024d1ad5d17408306b3b513f087b, type: 3}
+    speed: {fileID: 21300000, guid: 2d481a531723d584a87e533fe23452b4, type: 3}
+    frozen: {fileID: 21300000, guid: d99d0fc4a381f614f9d6d5bc70f3bcdb, type: 3}
+  - name: Pollo 7
+    normal: {fileID: 21300000, guid: 4fc0e681f9bed4e4eaec435be6724c37, type: 3}
+    speed: {fileID: 21300000, guid: 45c864fa42b569041a82c90cb5989792, type: 3}
+    frozen: {fileID: 21300000, guid: 2b2da425a472f20418d9c65671d1ecac, type: 3}
+  - name: Pollo6
+    normal: {fileID: 21300000, guid: 041a0ece035b0be4198a2d9acb69d620, type: 3}
+    speed: {fileID: 21300000, guid: fc5d752b8c1cf704b8bce869527e6d26, type: 3}
+    frozen: {fileID: 21300000, guid: 0efa7af43c5b0c04a8b4e5356d648361, type: 3}
+  - name: pollo3
+    normal: {fileID: 21300000, guid: e3c32d0c50d7e1e4c8a69b00b87e88e3, type: 3}
+    speed: {fileID: 21300000, guid: 69f90eab104ca6745aa961ada7c44e38, type: 3}
+    frozen: {fileID: 21300000, guid: dcb06529fb6317b48bd1e1a582c1daf9, type: 3}
+  - name: Pollo2
+    normal: {fileID: 21300000, guid: af545ded09a03e94cb9bfe242e1895df, type: 3}
+    speed: {fileID: 21300000, guid: 0342c23c77cda8a4bb44adeff6686b0d, type: 3}
+    frozen: {fileID: 21300000, guid: a38c185534407f24595006e696dfd5d0, type: 3}
+  chickenSprites: []
+  rotateChickens: 1
+  chickenImageFacing: -90
+  itemScale: 0.6
   playerColors:
   - {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
   - {r: 0, g: 1, b: 1, a: 1}
   - {r: 0, g: 1, b: 0, a: 1}
   - {r: 1, g: 0.5, b: 0, a: 1}
   nameLabelHeight: 4
+  resultsTexts:
+    winTitle: 
+    winSubtitle: "\xA1Eres el pollo m\xE1s r\xE1pido de la granja!"
+    loseTitle: 
+    loseSubtitle: "Gan\xF3 {winner}"
+    tieWinTitle: 
+    tieWinSubtitle: Victoria compartida con {winner}
+    tieLoseSubtitle: 'Empataron en el primer lugar: {winner}'
+    noWinnerTitle: 
+    showRanking: 1
+    rowFormat: "{pos}. {name}{you}  -  {score} pts  ({items} ma\xEDces, {specials}
+      especiales)"
+    youTag: " (t\xFA)"
+    playerNameFormat: Jugador {n}
+    footer: "Desempate: m\xE1s ma\xEDces especiales. Si siguen iguales, victoria
+      compartida."
+    playAgainButton: Jugar otra vez
+    menuButton: "Men\xFA principal"
+    textColor: {r: 1, g: 1, b: 1, a: 1}
+    showTitlesOverImage: 0
+    showFooter: 0
+    highlightWinnerRows: 0
+    rankingFontSize: 30
+    rankingOutline: 0.2
+    highlightColor: {r: 1, g: 0.835, b: 0.29, a: 1}
+    titleSize: 130
+    subtitleSize: 90
+    footerSize: 70
+  winImage: {fileID: 21300000, guid: 8425af17b9954f84583e35cd4ebb14f3, type: 3}
+  loseImage: {fileID: 21300000, guid: a10394a4fdf9c2a48a488e7be93e972b, type: 3}
+  resultsImageSize: {x: 1500, y: 750}
+  resultsImageOffset: {x: 0, y: 60}
+  resultsImageKeepAspect: 1
+  rankingPosition: {x: 0, y: -0.06}
+  rankingSize: {x: 0.55, y: 0.2}
+  imageHasButtons: 1
+  replayButtonPosition: {x: -0.18, y: -0.36}
+  homeButtonPosition: {x: 0.19, y: -0.35}
+  imageButtonSize: 0.2
+  showButtonAreas: 0
   lobbySceneName: Lobby
   mainMenuSceneName: MainMenu
   pickupClip: {fileID: 8300000, guid: b79b0eb03773e82438cb2873dd2cc761, type: 3}
@@ -1865,8 +1936,8 @@ Transform:
   m_GameObject: {fileID: 1955487125}
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: 648, y: 400, z: 0}
-  m_LocalScale: {x: 10, y: 10, z: 10}
+  m_LocalPosition: {x: -750.27997, y: 321.13998, z: 643.99994}
+  m_LocalScale: {x: 7.1642585, y: 7.1642585, z: 7.1642585}
   m_ConstrainProportionsScale: 1
   m_Children: []
   m_Father: {fileID: 3017065176447481220}
@@ -2274,20 +2345,56 @@ PrefabInstance:
       value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 6037693249788078669, guid: 82ffd5138e4efa049951006cee6ac214, type: 3}
+      propertyPath: m_LocalScale.x
+      value: 0.7164259
+      objectReference: {fileID: 0}
+    - target: {fileID: 6037693249788078669, guid: 82ffd5138e4efa049951006cee6ac214, type: 3}
+      propertyPath: m_LocalScale.y
+      value: 0.7164259
+      objectReference: {fileID: 0}
+    - target: {fileID: 6037693249788078669, guid: 82ffd5138e4efa049951006cee6ac214, type: 3}
+      propertyPath: m_LocalScale.z
+      value: 0.7164259
+      objectReference: {fileID: 0}
+    - target: {fileID: 6037693249788078669, guid: 82ffd5138e4efa049951006cee6ac214, type: 3}
+      propertyPath: m_LocalPosition.z
+      value: 644
+      objectReference: {fileID: 0}
+    - target: {fileID: 6037693249788078669, guid: 82ffd5138e4efa049951006cee6ac214, type: 3}
       propertyPath: m_AnchoredPosition.x
-      value: 714
+      value: -703
       objectReference: {fileID: 0}
     - target: {fileID: 6037693249788078669, guid: 82ffd5138e4efa049951006cee6ac214, type: 3}
       propertyPath: m_AnchoredPosition.y
-      value: 397
+      value: 319
+      objectReference: {fileID: 0}
+    - target: {fileID: 6154708622561085318, guid: 82ffd5138e4efa049951006cee6ac214, type: 3}
+      propertyPath: m_LocalPosition.z
+      value: -191
+      objectReference: {fileID: 0}
+    - target: {fileID: 8552434947199299766, guid: 82ffd5138e4efa049951006cee6ac214, type: 3}
+      propertyPath: m_LocalScale.x
+      value: 0.7164259
+      objectReference: {fileID: 0}
+    - target: {fileID: 8552434947199299766, guid: 82ffd5138e4efa049951006cee6ac214, type: 3}
+      propertyPath: m_LocalScale.y
+      value: 0.7164259
+      objectReference: {fileID: 0}
+    - target: {fileID: 8552434947199299766, guid: 82ffd5138e4efa049951006cee6ac214, type: 3}
+      propertyPath: m_LocalScale.z
+      value: 0.7164259
+      objectReference: {fileID: 0}
+    - target: {fileID: 8552434947199299766, guid: 82ffd5138e4efa049951006cee6ac214, type: 3}
+      propertyPath: m_LocalPosition.z
+      value: 643.99994
       objectReference: {fileID: 0}
     - target: {fileID: 8552434947199299766, guid: 82ffd5138e4efa049951006cee6ac214, type: 3}
       propertyPath: m_AnchoredPosition.x
-      value: 69
+      value: -702.29
       objectReference: {fileID: 0}
     - target: {fileID: 8552434947199299766, guid: 82ffd5138e4efa049951006cee6ac214, type: 3}
       propertyPath: m_AnchoredPosition.y
-      value: 396
+      value: 391.34998
       objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []

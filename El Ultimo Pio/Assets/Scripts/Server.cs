@@ -41,6 +41,7 @@ public static class GameServer
     public static float FreezeDuration = 3f;        // segundos congelado (doc: 2 a 4)
     public static float PowerUpCooldown = 2f;       // segundos entre usos de power-ups
     public static float MaxPickupDistance = 6f;     // validación anti-trampa del servidor
+    public static bool RespawnItems = true;         // el maíz recogido reaparece en otro lugar (siempre hay 50)
 
     private const int ReadyTimeoutMs = 15000;
 
@@ -518,6 +519,7 @@ public static class GameServer
 
         int type;
         bool chargeChanged = false;
+        string respawnMessage = null;
         lock (stateLock)
         {
             if (!gameBegan || gameOver) return;
@@ -528,8 +530,26 @@ public static class GameServer
             float dy = itemY[itemID] - from.PosY;
             if (Math.Sqrt(dx * dx + dy * dy) > MaxPickupDistance) return; // demasiado lejos
 
-            collectedItemIDs.Add(itemID);
             type = itemT[itemID];
+
+            if (RespawnItems)
+            {
+                // Se mueve a otro lugar con el MISMO tipo: el mapa nunca se queda sin maíces
+                // y siempre hay la misma cantidad de maíces especiales.
+                float[] px = new float[clients.Count], py = new float[clients.Count];
+                for (int k = 0; k < clients.Count; k++) { px[k] = clients[k].PosX; py[k] = clients[k].PosY; }
+
+                MatchGenerator.RandomRespawnPosition(rng, itemID, itemX, itemY, MatchGenerator.TotalItems,
+                                                     px, py, clients.Count, out float nx, out float ny);
+                itemX[itemID] = nx;
+                itemY[itemID] = ny;
+                respawnMessage = BuildMessage("ITEM_SPAWNED",
+                    "{\"itemID\":" + itemID + ",\"posX\":" + F(nx) + ",\"posY\":" + F(ny) + ",\"itemType\":" + type + "}");
+            }
+            else
+            {
+                collectedItemIDs.Add(itemID);
+            }
 
             from.Items++;
             if (type == MatchGenerator.TypeNormal)
@@ -556,6 +576,7 @@ public static class GameServer
 
         Broadcast(BuildMessage("ITEM_PICKED_UP",
             "{\"playerSlot\":" + from.Slot + ",\"itemID\":" + itemID + ",\"itemType\":" + type + "}"));
+        if (respawnMessage != null) Broadcast(respawnMessage);
         Broadcast(BuildScoreUpdate());
         if (chargeChanged) SendCharges(from);
     }

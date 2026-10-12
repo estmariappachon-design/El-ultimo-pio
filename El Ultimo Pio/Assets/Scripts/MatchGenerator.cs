@@ -88,6 +88,47 @@ public static class MatchGenerator
         }
     }
 
+    // Nueva posición para un maíz recogido: lejos de los pollos (para que no lo vuelvan a coger
+    // al instante) y separada de los demás maíces.
+    public const float MinRespawnDistanceToPlayer = 10f;
+
+    public static void RandomRespawnPosition(Random rng, int itemIndex, float[] itemX, float[] itemY, int itemCount,
+                                             float[] playerX, float[] playerY, int playerCount,
+                                             out float x, out float y)
+    {
+        x = 0f; y = 0f;
+        float bestScore = -1f;
+
+        for (int attempt = 0; attempt < 40; attempt++)
+        {
+            float cx = RandomRange(rng, -ItemArea, ItemArea);
+            float cy = RandomRange(rng, -ItemArea, ItemArea);
+
+            float toPlayers = MinDistanceTo(cx, cy, playerX, playerY, playerCount);
+            float toItems = float.MaxValue;
+            for (int k = 0; k < itemCount; k++)
+            {
+                if (k == itemIndex) continue;
+                float dx = itemX[k] - cx, dy = itemY[k] - cy;
+                float d = (float)Math.Sqrt(dx * dx + dy * dy);
+                if (d < toItems) toItems = d;
+            }
+
+            bool ok = toPlayers >= MinRespawnDistanceToPlayer && toItems >= MinDistanceBetweenItems;
+            float score = Math.Min(toPlayers / MinRespawnDistanceToPlayer, toItems / MinDistanceBetweenItems);
+            if (score > bestScore)
+            {
+                bestScore = score;
+                x = cx;
+                y = cy;
+            }
+            if (ok) break;
+        }
+
+        x = Round2(x);
+        y = Round2(y);
+    }
+
     private static float MinDistanceTo(float x, float y, float[] xs, float[] ys, int count)
     {
         float min = float.MaxValue;

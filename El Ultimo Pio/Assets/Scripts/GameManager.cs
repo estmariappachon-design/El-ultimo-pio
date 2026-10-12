@@ -36,13 +36,54 @@ public class GameManager : MonoBehaviour
     [SerializeField] private Color buttonOnColor = Color.white;
     [SerializeField] private Color buttonOffColor = new Color(0.35f, 0.35f, 0.35f, 0.5f);
 
-    [Header("Pollos (MISMO ORDEN que en el lobby)")]
+    [Header("Pollos del JUEGO, uno por color (MISMO ORDEN que la paleta del lobby)")]
+    [Tooltip("Elemento 0 = ColorButton1, elemento 1 = ColorButton2 ... Cada uno con su imagen normal, de turbo y congelado")]
+    [SerializeField] private ChickenSkin[] chickenSkins;
+    [Tooltip("Solo se usa si Chicken Skins está vacío (versión anterior)")]
     [SerializeField] private Sprite[] chickenSprites;
+
+    [Header("Rotación de los pollos")]
+    [SerializeField] private bool rotateChickens = true;
+    [Tooltip("Hacia dónde mira el pollo en la imagen: 90 = arriba, 0 = derecha, -90 = abajo, 180 = izquierda")]
+    [SerializeField] private float chickenImageFacing = 90f;
+
+    [Header("Maíces")]
+    [Tooltip("Tamaño de los maíces respecto al prefab (1 = igual, 0.6 = 60 %)")]
+    [SerializeField, Range(0.2f, 1.5f)] private float itemScale = 0.6f;
     [SerializeField] private Color[] playerColors =
     {
         Color.yellow, Color.cyan, Color.green, new Color(1f, 0.5f, 0f)
     }; // solo se usan si no hay sprite asignado
     [SerializeField] private float nameLabelHeight = 4f;
+
+    [Header("Pantalla de resultados")]
+    [Tooltip("Todos los textos de la pantalla final. Despliega para editarlos")]
+    [SerializeField] private ResultsTexts resultsTexts = new ResultsTexts();
+    [Tooltip("Imagen detrás del texto cuando GANAS (o empatas en el primer lugar)")]
+    [SerializeField] private Sprite winImage;
+    [Tooltip("Imagen detrás del texto cuando PIERDES. Si se deja vacía, se usa la de ganar")]
+    [SerializeField] private Sprite loseImage;
+    [Tooltip("Tamaño de la imagen en pantalla (referencia 1920x1080)")]
+    [SerializeField] private Vector2 resultsImageSize = new Vector2(1500f, 750f);
+    [Tooltip("Posición: 0,0 = centro. Súbela o bájala para cuadrarla con las letras")]
+    [SerializeField] private Vector2 resultsImageOffset = new Vector2(0f, 60f);
+    [Tooltip("Mantener la forma original de la imagen (no estirarla)")]
+    [SerializeField] private bool resultsImageKeepAspect = true;
+
+    [Header("Ranking dentro de la imagen (posiciones relativas a la imagen: 0,0 = centro; 0.5 = borde)")]
+    [SerializeField] private Vector2 rankingPosition = new Vector2(0f, -0.06f);
+    [Tooltip("Ancho y alto del área del ranking, en fracción de la imagen")]
+    [SerializeField] private Vector2 rankingSize = new Vector2(0.55f, 0.2f);
+
+    [Header("Botones dibujados en la imagen")]
+    [Tooltip("Si tu imagen ya trae los botones (reintentar y casa), se vuelven tocables y no se crean los rectangulares")]
+    [SerializeField] private bool imageHasButtons = true;
+    [SerializeField] private Vector2 replayButtonPosition = new Vector2(-0.18f, -0.36f);
+    [SerializeField] private Vector2 homeButtonPosition = new Vector2(0.19f, -0.35f);
+    [Tooltip("Diámetro de la zona tocable, en fracción del ancho de la imagen")]
+    [SerializeField, Range(0.05f, 0.5f)] private float imageButtonSize = 0.2f;
+    [Tooltip("Marca esto para VER las zonas tocables en rojo y cuadrarlas; desmárcalo al terminar")]
+    [SerializeField] private bool showButtonAreas = false;
 
     [Header("Escenas")]
     [SerializeField] private string lobbySceneName = "Lobby";
@@ -240,23 +281,37 @@ public class GameManager : MonoBehaviour
 
         int count = Mathf.Min(GameSession.ItemX.Length, Mathf.Min(GameSession.ItemY.Length, GameSession.ItemT.Length));
         for (int i = 0; i < count; i++)
-        {
-            ItemType type = (ItemType)GameSession.ItemT[i];
+            SpawnItem(i, (ItemType)GameSession.ItemT[i], new Vector2(GameSession.ItemX[i], GameSession.ItemY[i]), false);
+    }
 
-            GameObject prefab = maizNormalPrefab;
-            if (type == ItemType.SpeedBoost && maizVelocidadPrefab != null) prefab = maizVelocidadPrefab;
-            else if (type == ItemType.Freeze && maizCongelarPrefab != null) prefab = maizCongelarPrefab;
+    private void SpawnItem(int id, ItemType type, Vector2 position, bool popIn)
+    {
+        if (maizNormalPrefab == null) return;
 
-            Vector3 pos = new Vector3(GameSession.ItemX[i], GameSession.ItemY[i], 0f);
-            GameObject itemObj = Instantiate(prefab, pos, Quaternion.identity);
-            itemObj.name = "Maiz_" + i + "_" + type;
+        // Si por algún motivo ya existe uno con ese número, se reemplaza
+        if (items.TryGetValue(id, out CollectibleItem old) && old != null) Destroy(old.gameObject);
 
-            CollectibleItem itemScript = itemObj.GetComponent<CollectibleItem>();
-            if (itemScript == null) itemScript = itemObj.AddComponent<CollectibleItem>();
-            itemScript.itemID = i;
-            itemScript.type = type;
-            items[i] = itemScript;
-        }
+        GameObject prefab = maizNormalPrefab;
+        if (type == ItemType.SpeedBoost && maizVelocidadPrefab != null) prefab = maizVelocidadPrefab;
+        else if (type == ItemType.Freeze && maizCongelarPrefab != null) prefab = maizCongelarPrefab;
+
+        GameObject itemObj = Instantiate(prefab, new Vector3(position.x, position.y, 0f), Quaternion.identity);
+        itemObj.name = "Maiz_" + id + "_" + type;
+        itemObj.transform.localScale = prefab.transform.localScale * itemScale; // maíces más pequeños
+
+        CollectibleItem itemScript = itemObj.GetComponent<CollectibleItem>();
+        if (itemScript == null) itemScript = itemObj.AddComponent<CollectibleItem>();
+        itemScript.itemID = id;
+        itemScript.type = type;
+        if (popIn) itemScript.PlaySpawnAnimation();
+        items[id] = itemScript;
+    }
+
+    // El servidor recolocó un maíz recogido en otro lugar del mapa (siempre hay 50)
+    public void OnItemSpawned(int itemID, float x, float y, ItemType type)
+    {
+        if (gameOverHandled) return;
+        SpawnItem(itemID, type, new Vector2(x, y), true);
     }
 
     // Lo llama CollectibleItem cuando el pollo local toca un maíz
@@ -529,6 +584,7 @@ public class GameManager : MonoBehaviour
     {
         ChickenAnimator anim = go.GetComponent<ChickenAnimator>();
         if (anim == null) anim = go.AddComponent<ChickenAnimator>();
+        anim.SetFacingSettings(rotateChickens, chickenImageFacing);
         return anim;
     }
 
@@ -555,13 +611,26 @@ public class GameManager : MonoBehaviour
         sr.sortingOrder = 100;
 
         int idx = GameSession.ChickenOf(slot);
-        bool hasSprite = chickenSprites != null && idx >= 0 && idx < chickenSprites.Length && chickenSprites[idx] != null;
-
         Color color = Color.white;
-        if (hasSprite)
+
+        ChickenSkin skin = (chickenSkins != null && idx >= 0 && idx < chickenSkins.Length) ? chickenSkins[idx] : null;
+        if (skin != null && skin.normal != null)
+        {
+            // Pollo del color elegido, con sus imágenes de turbo y congelado
+            sr.sprite = skin.normal;
+            if (anim != null) anim.SetSkin(skin.normal, skin.speed, skin.frozen);
+        }
+        else if (chickenSprites != null && idx >= 0 && idx < chickenSprites.Length && chickenSprites[idx] != null)
+        {
             sr.sprite = chickenSprites[idx];
-        else if (tintIfNoSprite && playerColors != null && playerColors.Length > 0)
-            color = playerColors[Mathf.Abs(slot) % playerColors.Length];
+            if (anim != null) anim.SetSkin(chickenSprites[idx], null, null);
+        }
+        else
+        {
+            Debug.LogWarning("[GM] No hay imagen para el pollo " + idx + " (jugador " + (slot + 1) + "). Revisa Chicken Skins.");
+            if (tintIfNoSprite && playerColors != null && playerColors.Length > 0)
+                color = playerColors[Mathf.Abs(slot) % playerColors.Length];
+        }
 
         if (anim != null) anim.SetBaseColor(color);
         else sr.color = color;
@@ -659,7 +728,10 @@ public class GameManager : MonoBehaviour
         if (btn.targetGraphic != null)
             btn.targetGraphic.color = active ? buttonOnColor : buttonOffColor;
 
-        btn.transform.localScale = active ? Vector3.one : Vector3.one * 0.9f;
+        // El tamaño lo anima UIButtonFeedback; aquí solo se indica si está disponible
+        UIButtonFeedback fb = btn.GetComponent<UIButtonFeedback>();
+        if (fb == null) fb = btn.gameObject.AddComponent<UIButtonFeedback>();
+        fb.SetDimmed(!active);
     }
 
     private void ShowStatus(string text, float seconds, Color color)
@@ -777,38 +849,64 @@ public class GameManager : MonoBehaviour
             if (r.winners != null && i < r.winners.Length && r.winners[i] == 1)
             {
                 winnersCount++;
-                winnerNames.Add(GameSession.PlayerName(r.slots[i]));
+                winnerNames.Add((resultsTexts ?? new ResultsTexts()).PlayerName(r.slots[i]));
                 if (r.slots[i] == MySlot) iWon = true;
             }
         }
 
+        ResultsTexts txt = resultsTexts ?? new ResultsTexts();
+        string hl = "#" + ColorUtility.ToHtmlStringRGB(txt.highlightColor);
+        string winnersList = string.Join(", ", winnerNames);
+
+        // ----- Título (solo si la imagen NO lo trae dibujado) -----
+        string title, subtitle;
+        if (winnersCount > 1)       { title = iWon ? txt.tieWinTitle : txt.loseTitle; subtitle = iWon ? txt.tieWinSubtitle : txt.tieLoseSubtitle; }
+        else if (iWon)              { title = txt.winTitle;  subtitle = txt.winSubtitle; }
+        else if (winnersCount == 1) { title = txt.loseTitle; subtitle = txt.loseSubtitle; }
+        else                        { title = txt.noWinnerTitle; subtitle = ""; }
+
+        Sprite bg = iWon ? winImage : (loseImage != null ? loseImage : winImage);
+        bool useImage = bg != null;
+        bool showTitles = !useImage || txt.showTitlesOverImage;
+
         StringBuilder sb = new StringBuilder();
-        if (winnersCount > 1)
-            sb.AppendLine("<size=130%><color=#FFD54A>¡EMPATE! Victoria compartida</color></size>");
-        else if (iWon)
-            sb.AppendLine("<size=130%><color=#FFD54A>¡GANASTE!</color></size>");
-        else if (winnersCount == 1)
-            sb.AppendLine("<size=130%><color=#FFD54A>GANADOR: " + winnerNames[0] + "</color></size>");
-        else
-            sb.AppendLine("<size=130%>FIN DEL JUEGO</size>");
-
-        sb.AppendLine();
-
-        for (int i = 0; i < r.slots.Length; i++)
+        if (showTitles)
         {
-            int slot = r.slots[i];
-            int score = r.scores != null && i < r.scores.Length ? r.scores[i] : 0;
-            int its = r.items != null && i < r.items.Length ? r.items[i] : 0;
-            int sp = r.specials != null && i < r.specials.Length ? r.specials[i] : 0;
-            bool winner = r.winners != null && i < r.winners.Length && r.winners[i] == 1;
-
-            string line = (i + 1) + ". " + GameSession.PlayerName(slot) + (slot == MySlot ? " (tú)" : "") +
-                          "  -  " + score + " pts  (" + its + " maíces, " + sp + " especiales)";
-            sb.AppendLine(winner ? "<color=#FFD54A>" + line + "</color>" : line);
+            sb.AppendLine("<size=" + txt.titleSize + "%><color=" + hl + ">" + title + "</color></size>");
+            if (!string.IsNullOrEmpty(subtitle))
+                sb.AppendLine("<size=" + txt.subtitleSize + "%>" + subtitle.Replace("{winner}", winnersList) + "</size>");
+            sb.AppendLine();
         }
 
-        sb.AppendLine();
-        sb.Append("<size=70%>Desempate: más maíces especiales. Si siguen iguales, victoria compartida.</size>");
+        // ----- Ranking -----
+        if (txt.showRanking)
+        {
+            for (int i = 0; i < r.slots.Length; i++)
+            {
+                int slot = r.slots[i];
+                int score = r.scores != null && i < r.scores.Length ? r.scores[i] : 0;
+                int its = r.items != null && i < r.items.Length ? r.items[i] : 0;
+                int sp = r.specials != null && i < r.specials.Length ? r.specials[i] : 0;
+                bool winner = r.winners != null && i < r.winners.Length && r.winners[i] == 1;
+
+                string line = txt.rowFormat
+                    .Replace("{pos}", (i + 1).ToString())
+                    .Replace("{name}", txt.PlayerName(slot))
+                    .Replace("{you}", slot == MySlot ? txt.youTag : "")
+                    .Replace("{score}", score.ToString())
+                    .Replace("{items}", its.ToString())
+                    .Replace("{specials}", sp.ToString());
+
+                bool colorRow = winner && txt.highlightWinnerRows;
+                sb.AppendLine(colorRow ? "<color=" + hl + ">" + line + "</color>" : line);
+            }
+        }
+
+        if (txt.showFooter && !string.IsNullOrEmpty(txt.footer))
+        {
+            sb.AppendLine();
+            sb.Append("<size=" + txt.footerSize + "%>" + txt.footer + "</size>");
+        }
 
         Canvas canvas = scoreText != null ? scoreText.canvas : FindAnyObjectByType<Canvas>();
         if (canvas == null)
@@ -825,6 +923,13 @@ public class GameManager : MonoBehaviour
         panel.transform.SetParent(canvas.transform, false);
         panel.transform.SetAsLastSibling();
 
+        // Canvas propio con orden alto: así los pollos, sus etiquetas y los maíces
+        // NUNCA se dibujan encima de la pantalla final
+        Canvas panelCanvas = panel.AddComponent<Canvas>();
+        panelCanvas.overrideSorting = true;
+        panelCanvas.sortingOrder = 1000;
+        panel.AddComponent<GraphicRaycaster>();
+
         RectTransform rt = panel.GetComponent<RectTransform>();
         rt.anchorMin = Vector2.zero;
         rt.anchorMax = Vector2.one;
@@ -832,18 +937,139 @@ public class GameManager : MonoBehaviour
         rt.offsetMax = Vector2.zero;
         panel.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0.85f);
 
-        TextMeshProUGUI tmp = CreateUIText(panel.transform, "TextoResultados",
-            new Vector2(0.5f, 0.5f), new Vector2(0f, 60f), new Vector2(1500f, 650f), 46f,
-            TextAlignmentOptions.Center);
-        tmp.enableAutoSizing = true;
-        tmp.fontSizeMin = 18f;
-        tmp.fontSizeMax = 52f;
-        tmp.text = sb.ToString();
+        if (useImage)
+        {
+            // ----- Con imagen: el ranking va DENTRO de la imagen, pequeño y en blanco -----
+            RectTransform irt = CreateResultsImage(panel.transform, bg);
 
-        CreatePanelButton(panel.transform, "BtnJugarOtraVez", "Jugar otra vez", new Vector2(-260f, 60f),
+            TextMeshProUGUI rank = CreateUIText(irt, "TextoRanking", new Vector2(0.5f, 0.5f), Vector2.zero, Vector2.zero,
+                txt.rankingFontSize, TextAlignmentOptions.Center);
+            RectTransform rrt = rank.rectTransform;
+            Vector2 c = new Vector2(0.5f, 0.5f) + rankingPosition;
+            rrt.anchorMin = c - rankingSize * 0.5f;
+            rrt.anchorMax = c + rankingSize * 0.5f;
+            rrt.offsetMin = rrt.offsetMax = Vector2.zero;
+
+            rank.enableAutoSizing = true;
+            rank.fontSizeMin = 10f;
+            rank.fontSizeMax = txt.rankingFontSize;
+            rank.color = txt.textColor;
+            rank.outlineWidth = txt.rankingOutline;
+            rank.outlineColor = new Color32(0, 0, 0, 200);
+            rank.text = sb.ToString().TrimEnd();
+
+            if (imageHasButtons)
+            {
+                // Los botones redondos dibujados en la imagen se vuelven tocables
+                CreateImageHotspot(irt, "BtnJugarOtraVez", replayButtonPosition, BackToLobby);
+                CreateImageHotspot(irt, "BtnMenu", homeButtonPosition, GoToMainMenu);
+                return;
+            }
+        }
+        else
+        {
+            // ----- Sin imagen: texto grande en el centro -----
+            TextMeshProUGUI tmp = CreateUIText(panel.transform, "TextoResultados",
+                new Vector2(0.5f, 0.5f), new Vector2(0f, 60f), new Vector2(1500f, 650f), 46f,
+                TextAlignmentOptions.Center);
+            tmp.enableAutoSizing = true;
+            tmp.fontSizeMin = 18f;
+            tmp.fontSizeMax = 52f;
+            tmp.text = sb.ToString();
+            tmp.color = txt.textColor;
+        }
+
+        CreatePanelButton(panel.transform, "BtnJugarOtraVez", txt.playAgainButton, new Vector2(-260f, 60f),
             new Color(0.8f, 0.5f, 0.25f), BackToLobby);
-        CreatePanelButton(panel.transform, "BtnMenu", "Menú principal", new Vector2(260f, 60f),
+        CreatePanelButton(panel.transform, "BtnMenu", txt.menuButton, new Vector2(260f, 60f),
             new Color(0.35f, 0.35f, 0.35f), GoToMainMenu);
+    }
+
+    // Crea la imagen de ganar/perder con su forma real (sin estirarla), dentro del tamaño máximo
+    private RectTransform CreateResultsImage(Transform parent, Sprite sprite)
+    {
+        GameObject imgObj = new GameObject("ImagenResultados", typeof(RectTransform), typeof(Image));
+        imgObj.transform.SetParent(parent, false);
+
+        RectTransform irt = imgObj.GetComponent<RectTransform>();
+        irt.anchorMin = irt.anchorMax = irt.pivot = new Vector2(0.5f, 0.5f);
+        irt.anchoredPosition = resultsImageOffset;
+
+        Vector2 size = resultsImageSize;
+        if (resultsImageKeepAspect && sprite.rect.height > 0f)
+        {
+            float aspect = sprite.rect.width / sprite.rect.height;
+            if (size.x / size.y > aspect) size.x = size.y * aspect;
+            else size.y = size.x / aspect;
+        }
+        irt.sizeDelta = size;
+
+        Image img = imgObj.GetComponent<Image>();
+        img.sprite = sprite;
+        img.raycastTarget = false;
+        return irt;
+    }
+
+    // Zona tocable invisible sobre un botón dibujado en la imagen.
+    // Al pasar el mouse se aclara y al tocar se oscurece un poco (círculo semitransparente).
+    private void CreateImageHotspot(RectTransform image, string name, Vector2 position, UnityEngine.Events.UnityAction action)
+    {
+        GameObject go = new GameObject(name, typeof(RectTransform), typeof(Image), typeof(Button));
+        go.transform.SetParent(image, false);
+
+        RectTransform hrt = go.GetComponent<RectTransform>();
+        Vector2 c = new Vector2(0.5f, 0.5f) + position;
+        hrt.anchorMin = hrt.anchorMax = c;
+        hrt.pivot = new Vector2(0.5f, 0.5f);
+        float d = image.sizeDelta.x * imageButtonSize;
+        hrt.sizeDelta = new Vector2(d, d);
+        hrt.anchoredPosition = Vector2.zero;
+
+        Image img = go.GetComponent<Image>();
+        img.sprite = CircleSprite();
+        img.color = Color.white;
+
+        Button b = go.GetComponent<Button>();
+        b.targetGraphic = img;
+        b.transition = Selectable.Transition.ColorTint;
+        ColorBlock cb = b.colors;
+        cb.normalColor = new Color(1f, 1f, 1f, 0f);
+        cb.highlightedColor = new Color(1f, 1f, 1f, 0.18f);
+        cb.selectedColor = new Color(1f, 1f, 1f, 0f);
+        cb.pressedColor = new Color(0f, 0f, 0f, 0.3f);
+        cb.fadeDuration = 0.08f;
+        b.colors = cb;
+        Navigation nav = b.navigation;
+        nav.mode = Navigation.Mode.None;
+        b.navigation = nav;
+        b.onClick.AddListener(action);
+
+        // Ver las zonas tocables para cuadrarlas con los dibujos
+        if (showButtonAreas) cb.normalColor = new Color(1f, 0f, 0f, 0.35f);
+        b.colors = cb;
+    }
+
+    private static Sprite circleSprite;
+
+    private static Sprite CircleSprite()
+    {
+        if (circleSprite != null) return circleSprite;
+
+        const int size = 128;
+        Texture2D tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+        float r = size * 0.5f;
+        for (int y = 0; y < size; y++)
+        {
+            for (int x = 0; x < size; x++)
+            {
+                float dx = x + 0.5f - r, dy = y + 0.5f - r;
+                float a = Mathf.Clamp01(r - Mathf.Sqrt(dx * dx + dy * dy)); // borde suave
+                tex.SetPixel(x, y, new Color(1f, 1f, 1f, a));
+            }
+        }
+        tex.Apply();
+        circleSprite = Sprite.Create(tex, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f), 100f);
+        return circleSprite;
     }
 
     private void CreatePanelButton(Transform parent, string name, string label, Vector2 pos, Color color,
@@ -865,6 +1091,7 @@ public class GameManager : MonoBehaviour
         Button b = btnObj.GetComponent<Button>();
         b.targetGraphic = img;
         b.onClick.AddListener(action);
+        btnObj.AddComponent<UIButtonFeedback>();
 
         TextMeshProUGUI t = CreateUIText(btnObj.transform, "Texto", new Vector2(0.5f, 0.5f), Vector2.zero,
             new Vector2(440f, 110f), 40f, TextAlignmentOptions.Center);
@@ -898,5 +1125,71 @@ public class GameManager : MonoBehaviour
     private void TestFrozen()
     {
         if (localPlayer != null) localPlayer.FreezePlayer(3f);
+    }
+}
+
+// Imágenes de UN pollo del juego (vista desde arriba) en sus 3 estados
+[System.Serializable]
+public class ChickenSkin
+{
+    public string name = "Pollo";
+    public Sprite normal;   // caminando normal
+    public Sprite speed;    // con turbo (velocidad)
+    public Sprite frozen;   // congelado
+}
+
+// Textos de la pantalla final (se editan en el Inspector del GameManager)
+// Comodines que se reemplazan solos:
+//   {winner}  -> nombre del ganador (o ganadores, separados por coma)
+//   {pos} {name} {you} {score} {items} {specials} -> en cada fila del ranking
+//   {n}       -> número del jugador en "Player Name Format"
+// Se pueden usar etiquetas de TextMeshPro: <b>negrita</b>, <i>cursiva</i>, <color=#FF0000>rojo</color>
+[System.Serializable]
+public class ResultsTexts
+{
+    [Header("Títulos")]
+    public string winTitle = "¡GANASTE!";
+    [TextArea] public string winSubtitle = "¡Eres el pollo más rápido de la granja!";
+    public string loseTitle = "¡PERDISTE!";
+    [TextArea] public string loseSubtitle = "Ganó {winner}";
+    public string tieWinTitle = "¡EMPATE!";
+    [TextArea] public string tieWinSubtitle = "Victoria compartida con {winner}";
+    [TextArea] public string tieLoseSubtitle = "Empataron en el primer lugar: {winner}";
+    public string noWinnerTitle = "FIN DEL JUEGO";
+
+    [Header("Ranking")]
+    public bool showRanking = true;
+    [Tooltip("Comodines: {pos} {name} {you} {score} {items} {specials}")]
+    public string rowFormat = "{pos}. {name}{you}  -  {score} pts  ({items} maíces, {specials} especiales)";
+    public string youTag = " (tú)";
+    [Tooltip("{n} = número del jugador (1 a 4)")]
+    public string playerNameFormat = "Jugador {n}";
+
+    [Header("Nota al final (vacío = no se muestra)")]
+    [TextArea] public string footer = "Desempate: más maíces especiales. Si siguen iguales, victoria compartida.";
+
+    [Header("Botones")]
+    public string playAgainButton = "Jugar otra vez";
+    public string menuButton = "Menú principal";
+
+    [Header("Estilo")]
+    public Color textColor = Color.white;
+    [Tooltip("Mostrar los títulos (¡GANASTE!...) aunque haya imagen. Déjalo apagado si la imagen ya los trae")]
+    public bool showTitlesOverImage = false;
+    [Tooltip("Mostrar la nota del desempate")]
+    public bool showFooter = false;
+    [Tooltip("Pintar con el color destacado las filas de los ganadores (apagado = todo blanco)")]
+    public bool highlightWinnerRows = false;
+    [Tooltip("Tamaño máximo de letra del ranking dentro de la imagen")]
+    [Range(10, 80)] public float rankingFontSize = 30f;
+    [Range(0f, 0.5f)] public float rankingOutline = 0.2f;
+    public Color highlightColor = new Color(1f, 0.835f, 0.29f);  // título y ganadores
+    [Range(50, 250)] public int titleSize = 130;     // % del tamaño normal
+    [Range(50, 200)] public int subtitleSize = 90;
+    [Range(30, 150)] public int footerSize = 70;
+
+    public string PlayerName(int slot)
+    {
+        return playerNameFormat.Replace("{n}", (slot + 1).ToString());
     }
 }

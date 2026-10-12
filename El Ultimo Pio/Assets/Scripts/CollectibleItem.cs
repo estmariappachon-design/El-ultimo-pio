@@ -22,6 +22,14 @@ public class CollectibleItem : MonoBehaviour
     private Vector3 basePos;
     private Vector3 baseScale;
     private float phaseOffset;
+    private float spawnAnim = 1f; // 0 -> 1 cuando aparece (reaparición)
+    private const float SpawnDuration = 0.35f;
+
+    // Al reaparecer en otro lugar: crece desde cero con un pequeño rebote
+    public void PlaySpawnAnimation()
+    {
+        spawnAnim = 0f;
+    }
 
     private void Awake()
     {
@@ -46,6 +54,15 @@ public class CollectibleItem : MonoBehaviour
 
         // Los especiales "laten" más fuerte para distinguirse a distancia
         float pulse = 1f + Mathf.Sin(t * 2f) * pulseAmount * (special ? 2.5f : 1f);
+
+        if (spawnAnim < 1f)
+        {
+            spawnAnim = Mathf.Min(1f, spawnAnim + Time.deltaTime / SpawnDuration);
+            // "Ease out back": pasa un poco del tamaño final y vuelve
+            float k = spawnAnim - 1f;
+            pulse *= 1f + 2.7f * k * k * k + 1.7f * k * k;
+        }
+
         transform.localScale = baseScale * pulse;
     }
 
@@ -56,7 +73,7 @@ public class CollectibleItem : MonoBehaviour
 
     private void TryRequest(Collider2D other)
     {
-        if (requested) return;
+        if (requested || spawnAnim < 1f) return; // no se puede coger mientras aparece
 
         PlayerController player = other.GetComponentInParent<PlayerController>();
         if (player == null || !player.isLocalPlayer || player.IsFrozen) return;

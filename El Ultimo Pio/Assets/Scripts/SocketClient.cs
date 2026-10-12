@@ -251,6 +251,13 @@ public class SocketClient : MonoBehaviour
                     break;
                 }
 
+            case "ITEM_SPAWNED":
+                {
+                    ItemSpawnedPayload d = JsonUtility.FromJson<ItemSpawnedPayload>(msg.payload);
+                    gm?.OnItemSpawned(d.itemID, d.posX, d.posY, (ItemType)d.itemType);
+                    break;
+                }
+
             case "SCORE_UPDATE":
                 {
                     ScoreUpdatePayload d = JsonUtility.FromJson<ScoreUpdatePayload>(msg.payload);

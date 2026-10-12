@@ -23,6 +23,7 @@ public class PlayerController : MonoBehaviour
     private float speedMultiplier = 1f;
 
     public bool IsFrozen { get; private set; }
+    public Vector2 MoveInput { get; private set; } // dirección del joystick/flechas (la usa ChickenAnimator para rotar)
     public bool IsBoosted => speedMultiplier > 1f;
 
     private void Awake()
@@ -36,6 +37,11 @@ public class PlayerController : MonoBehaviour
         chickenAnimator = GetComponent<ChickenAnimator>();
     }
 
+    private void OnDisable()
+    {
+        MoveInput = Vector2.zero;
+    }
+
     private void FixedUpdate()
     {
         if (!isLocalPlayer) return;
@@ -44,11 +50,13 @@ public class PlayerController : MonoBehaviour
 
         if (IsFrozen)
         {
+            MoveInput = Vector2.zero;
             rb.linearVelocity = Vector2.zero;
             return;
         }
 
         Vector2 input = ReadInput();
+        MoveInput = input.sqrMagnitude < 0.02f ? Vector2.zero : input;
 
         if (input.sqrMagnitude < 0.02f)
         {
