@@ -3,12 +3,12 @@ using UnityEngine.EventSystems;
 
 public class VirtualJoystick : MonoBehaviour, IPointerDownHandler, IDragHandler, IPointerUpHandler
 {
-    // DirecciÛn global que lee el PlayerController (valores de -1 a 1)
+    // Direcci√≥n global que lee el PlayerController (valores de -1 a 1)
     public static Vector2 Direction { get; private set; }
 
     [Header("Asignar en el Inspector")]
-    [SerializeField] private RectTransform background; // El cÌrculo grande (Joystick_Outer)
-    [SerializeField] private RectTransform handle;     // El cÌrculo pequeÒo (hijo del grande)
+    [SerializeField] private RectTransform background; // El c√≠rculo grande (Joystick_Outer)
+    [SerializeField] private RectTransform handle;     // El c√≠rculo peque√±o (hijo del grande)
 
     [SerializeField, Range(0.1f, 1f)] private float handleRange = 0.4f;
 
@@ -47,7 +47,7 @@ public class VirtualJoystick : MonoBehaviour, IPointerDownHandler, IDragHandler,
 
     private void UpdateJoystick(PointerEventData eventData)
     {
-        // Para Canvas en Screen Space - Overlay la c·mara es null, y eso es correcto
+        // Para Canvas en Screen Space - Overlay la c√°mara es null, y eso es correcto
         Camera cam = eventData.pressEventCamera;
 
         if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(

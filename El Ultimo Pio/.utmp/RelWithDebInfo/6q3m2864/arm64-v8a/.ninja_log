@@ -1,0 +1,10 @@
+# ninja log v5
+65	2755	8134739045966097	GameActivity/CMakeFiles/game.dir/UGAInputKeyEvent.cpp.o	e84e3defcfebac11
+51	2772	8134739045548248	GameActivity/CMakeFiles/game.dir/UGAEntry.cpp.o	c3a28af80e703de7
+11	2783	8134739046316326	GameActivity/CMakeFiles/game.dir/UGAConfiguration.cpp.o	d9076e4cc477a2d6
+99	2822	8134739046585391	GameActivity/CMakeFiles/game.dir/UGAInputMotionEvent.cpp.o	bccd9556593987e6
+0	2935	8134739047562558	GameActivity/CMakeFiles/game.dir/UGADebug.cpp.o	a885fc11a985a401
+81	3151	8134739049840962	GameActivity/CMakeFiles/game.dir/UGASoftKeyboard.cpp.o	d25f1fc5d95ea7c5
+37	3199	8134739050490649	GameActivity/CMakeFiles/game.dir/UGAInput.cpp.o	3ee9c110f47850fc
+24	3368	8134739052173021	GameActivity/CMakeFiles/game.dir/UGAApplication.cpp.o	cab3c2ea27ba8499
+3369	3609	8134739054599992	C:/Users/user/Music/El-ultimo-pio/El Ultimo Pio/Library/Bee/Android/Prj/IL2CPP/Gradle/unityLibrary/build/intermediates/cxx/RelWithDebInfo/6q3m2864/obj/arm64-v8a/libgame.so	b70ffe01e933f53e

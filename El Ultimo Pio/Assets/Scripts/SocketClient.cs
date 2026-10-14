@@ -2,67 +2,81 @@ using System;
 using System.Net.Sockets;
 using System.Text;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
+// Cliente TCP de cada celular. Vive entre escenas (DontDestroyOnLoad).
+// Lee los mensajes en un hilo secundario y los procesa en el hilo principal
+// mediante LobbyThreadDispatcher (Unity solo permite tocar objetos desde el hilo principal).
 public class SocketClient : MonoBehaviour
 {
     public static SocketClient Instance;
 
-    private TcpClient client;
-    private NetworkStream stream;
-    private readonly byte[] buffer = new byte[4096];
-    private readonly StringBuilder incoming = new StringBuilder(); // acumula texto hasta completar cada lÌnea
-    private readonly object sendLock = new object();
-    private volatile bool connected = false;
-
-    [Header("ConexiÛn")]
-    public string serverIP = "127.0.0.1"; // Cambiar a la IP de la PC donde corre el servidor
-    public int serverPort = 8888;
+    [Header("Conexi√≥n")]
+    public string serverIP = "127.0.0.1";
+    public int serverPort = GameServer.DefaultPort;
 
     [Header("Escenas")]
-    [SerializeField] private string gameSceneName = "Gameplay"; // Debe estar en Build Profiles > Scene List
+    [SerializeField] private string gameSceneName = "Gameplay";
+    [SerializeField] private string mainMenuSceneName = "MainMenu";
+
+    private TcpClient client;
+    private NetworkStream stream;
+    private readonly byte[] buffer = new byte[8192];
+    private readonly StringBuilder incoming = new StringBuilder();
+    private readonly object sendLock = new object();
+    private volatile bool connected = false;
+    private volatile bool leavingOnPurpose = false;
 
     public bool IsConnected => connected;
 
     private void Awake()
     {
-        if (Instance == null)
-        {
-            Instance = this;
-            DontDestroyOnLoad(gameObject);
-        }
-        else
+        if (Instance != null && Instance != this)
         {
             Destroy(gameObject);
+            return;
         }
+
+        Instance = this;
+        DontDestroyOnLoad(gameObject);
+
+        // El despachador debe existir siempre (antes solo estaba en la escena Lobby)
+        if (FindAnyObjectByType<LobbyThreadDispatcher>() == null)
+            new GameObject("ThreadDispatcher").AddComponent<LobbyThreadDispatcher>();
     }
 
-    public void ConnectToServer()
+    // Devuelve true si logr√≥ conectarse
+    public bool ConnectToServer()
     {
-        if (connected) return;
+        if (connected) return true;
 
         try
         {
+            leavingOnPurpose = false;
             client = new TcpClient();
             client.NoDelay = true;
 
-            // ConexiÛn con lÌmite de 3 segundos, para que el juego no se quede congelado si el servidor no est·
-            IAsyncResult connectResult = client.BeginConnect(serverIP, serverPort, null, null);
-            if (!connectResult.AsyncWaitHandle.WaitOne(3000))
+            // M√°ximo 3 segundos esperando, para que el juego no se quede congelado
+            IAsyncResult result = client.BeginConnect(serverIP, serverPort, null, null);
+            if (!result.AsyncWaitHandle.WaitOne(3000))
             {
                 client.Close();
-                throw new TimeoutException("El servidor no respondiÛ en 3 segundos (" + serverIP + ":" + serverPort + ")");
+                throw new TimeoutException("el servidor no respondi√≥ en 3 s (" + serverIP + ":" + serverPort + ")");
             }
-            client.EndConnect(connectResult);
+            client.EndConnect(result);
+
             stream = client.GetStream();
+            lock (incoming) { incoming.Clear(); }
             connected = true;
-            incoming.Clear();
             stream.BeginRead(buffer, 0, buffer.Length, OnDataReceived, null);
-            Debug.Log("Conectado al servidor de Sockets.");
+            Debug.Log("[Cliente] Conectado a " + serverIP + ":" + serverPort);
+            return true;
         }
         catch (Exception e)
         {
             connected = false;
-            Debug.LogError("Error al conectar: " + e.Message);
+            Debug.LogWarning("[Cliente] Error al conectar: " + e.Message);
+            return false;
         }
     }
 
@@ -75,7 +89,7 @@ public class SocketClient : MonoBehaviour
             NetworkMessage msg = new NetworkMessage
             {
                 type = type,
-                payload = JsonUtility.ToJson(payloadObj)
+                payload = JsonUtility.ToJson(payloadObj ?? new EmptyPayload())
             };
 
             byte[] data = Encoding.UTF8.GetBytes(JsonUtility.ToJson(msg) + "\n");
@@ -83,12 +97,12 @@ public class SocketClient : MonoBehaviour
         }
         catch (Exception e)
         {
-            Debug.LogError("Error enviando datos: " + e.Message);
+            Debug.LogWarning("[Cliente] Error enviando: " + e.Message);
             HandleDisconnect();
         }
     }
 
-    // Corre en un hilo secundario: solo separa las lÌneas, el resto se procesa en el hilo principal
+    // Hilo secundario: solo separa las l√≠neas
     private void OnDataReceived(IAsyncResult ar)
     {
         try
@@ -100,33 +114,35 @@ public class SocketClient : MonoBehaviour
                 return;
             }
 
-            incoming.Append(Encoding.UTF8.GetString(buffer, 0, bytesRead));
-
-            string data = incoming.ToString();
-            int start = 0;
-            int idx;
-            while ((idx = data.IndexOf('\n', start)) >= 0)
+            lock (incoming)
             {
-                string line = data.Substring(start, idx - start).Trim();
-                start = idx + 1;
-                if (line.Length == 0) continue;
+                incoming.Append(Encoding.UTF8.GetString(buffer, 0, bytesRead));
 
-                LobbyThreadDispatcher.Enqueue(() => ProcessLine(line));
+                string data = incoming.ToString();
+                int start = 0;
+                int idx;
+                while ((idx = data.IndexOf('\n', start)) >= 0)
+                {
+                    string line = data.Substring(start, idx - start).Trim();
+                    start = idx + 1;
+                    if (line.Length > 0) LobbyThreadDispatcher.Enqueue(() => ProcessLine(line));
+                }
+                incoming.Remove(0, start);
             }
-            incoming.Remove(0, start); // conserva el pedazo de lÌnea que a˙n no est· completo
 
             stream.BeginRead(buffer, 0, buffer.Length, OnDataReceived, null);
         }
         catch (Exception e)
         {
-            if (connected) Debug.LogError("Error recibiendo datos: " + e.Message);
+            if (connected && !leavingOnPurpose) Debug.LogWarning("[Cliente] Error recibiendo: " + e.Message);
             HandleDisconnect();
         }
     }
 
-    // Para el botÛn Home del lobby: libera tu lugar en el servidor
+    // Salida voluntaria (bot√≥n Home o Men√∫): NO muestra el aviso de "conexi√≥n perdida"
     public void Disconnect()
     {
+        leavingOnPurpose = true;
         HandleDisconnect();
     }
 
@@ -134,108 +150,150 @@ public class SocketClient : MonoBehaviour
     {
         if (!connected) return;
         connected = false;
-        try { client.Close(); } catch (Exception) { }
-        Debug.LogWarning("Desconectado del servidor.");
+        try { client?.Close(); } catch (Exception) { }
+
+        if (!leavingOnPurpose)
+            LobbyThreadDispatcher.Enqueue(OnConnectionLost);
     }
 
-    // ---------- Hilo principal de Unity ----------
+    // Hilo principal: si se cae el anfitri√≥n, todos vuelven al men√∫ con un mensaje
+    private void OnConnectionLost()
+    {
+        Debug.LogWarning("[Cliente] Se perdi√≥ la conexi√≥n con el servidor.");
+        if (GameServer.IsRunning) GameServer.StopServer();
+
+        if (SceneManager.GetActiveScene().name != mainMenuSceneName)
+        {
+            GameSession.LastError = "Se perdi√≥ la conexi√≥n con el anfitri√≥n.";
+            SceneManager.LoadScene(mainMenuSceneName);
+        }
+    }
+
+    // =================================================================================
+    //  Procesamiento de mensajes (hilo principal)
+    // =================================================================================
 
     private void ProcessLine(string line)
     {
-        NetworkMessage msg = JsonUtility.FromJson<NetworkMessage>(line);
+        NetworkMessage msg;
+        try { msg = JsonUtility.FromJson<NetworkMessage>(line); }
+        catch (Exception) { return; }
+
         if (msg == null || string.IsNullOrEmpty(msg.type)) return;
-        ProcessMessage(msg);
+
+        try { ProcessMessage(msg); }
+        catch (Exception e) { Debug.LogError("[Cliente] Error procesando " + msg.type + ": " + e); }
     }
 
     private void ProcessMessage(NetworkMessage msg)
     {
+        GameManager gm = GameManager.Instance;
+
         switch (msg.type)
         {
             case "JOIN_UPDATE":
                 {
-                    JoinPayload joinData = JsonUtility.FromJson<JoinPayload>(msg.payload);
-                    LobbyNetworkManager.Instance?.OnPlayerListUpdated(
-                        joinData.totalPlayers, joinData.isHost, joinData.playerSlot, joinData.slots);
+                    JoinPayload d = JsonUtility.FromJson<JoinPayload>(msg.payload);
+                    GameSession.MySlot = d.playerSlot;
+                    GameSession.IsHost = d.isHost;
+                    GameSession.MinPlayers = d.minPlayers > 0 ? d.minPlayers : 2;
+                    LobbyNetworkManager.Instance?.OnPlayerListUpdated(d.totalPlayers, d.isHost, d.playerSlot, d.slots);
                     break;
                 }
 
             case "SET_CHICKEN":
                 {
-                    ChickenPayload chickenData = JsonUtility.FromJson<ChickenPayload>(msg.payload);
-                    LobbyNetworkManager.Instance?.OnPlayerChangedChicken(chickenData.playerSlot, chickenData.chickenIndex);
+                    ChickenPayload d = JsonUtility.FromJson<ChickenPayload>(msg.payload);
+                    LobbyNetworkManager.Instance?.OnPlayerChangedChicken(d.playerSlot, d.chickenIndex);
                     break;
                 }
 
             case "START_GAME":
                 {
-                    if (!string.IsNullOrEmpty(msg.payload))
-                    {
-                        StartGamePayload start = JsonUtility.FromJson<StartGamePayload>(msg.payload);
-                        GameSession.Seed = start.seed;
-                        GameSession.Slots = start.slots;
-                        GameSession.Chickens = start.chickens;
-                        GameSession.HasSeed = true;
-                        GameSession.BeginPending = false;
-                    }
-                    UnityEngine.SceneManagement.SceneManager.LoadScene(gameSceneName);
+                    StartGamePayload d = JsonUtility.FromJson<StartGamePayload>(msg.payload);
+                    GameSession.Slots = d.slots;
+                    GameSession.Chickens = d.chickens;
+                    GameSession.SpawnX = d.spawnX;
+                    GameSession.SpawnY = d.spawnY;
+                    GameSession.ItemX = d.itemX;
+                    GameSession.ItemY = d.itemY;
+                    GameSession.ItemT = d.itemT;
+                    GameSession.Duration = d.duration > 0 ? d.duration : 120f;
+                    GameSession.HasMatch = true;
+                    GameSession.BeginPending = false;
+                    SceneManager.LoadScene(gameSceneName);
                     break;
                 }
 
             case "GAME_BEGIN":
                 {
-                    GameBeginPayload begin = JsonUtility.FromJson<GameBeginPayload>(msg.payload);
-                    if (GameManager.Instance != null)
-                    {
-                        GameManager.Instance.OnGameBegin(begin.duration);
-                    }
+                    GameBeginPayload d = JsonUtility.FromJson<GameBeginPayload>(msg.payload);
+                    if (gm != null) gm.OnGameBegin(d.duration);
                     else
                     {
-                        // La escena todavÌa est· cargando: GameManager lo recoge en su Start
                         GameSession.BeginPending = true;
-                        GameSession.BeginDuration = begin.duration;
+                        GameSession.BeginDuration = d.duration;
                     }
-                    break;
-                }
-
-            case "ITEM_PICKED_UP":
-                {
-                    PickupPayload pick = JsonUtility.FromJson<PickupPayload>(msg.payload);
-                    if (!Enum.TryParse(pick.itemType, out ItemType itemType)) itemType = ItemType.Normal;
-                    GameManager.Instance?.OnItemPickedUp(pick.itemID, pick.playerSlot, itemType);
-                    break;
-                }
-
-            case "USE_POWERUP":
-                {
-                    PowerUpPayload power = JsonUtility.FromJson<PowerUpPayload>(msg.payload);
-                    GameManager.Instance?.OnPowerUpUsed(power.senderSlot, power.powerUpType);
                     break;
                 }
 
             case "MOVE":
                 {
-                    MovePayload move = JsonUtility.FromJson<MovePayload>(msg.payload);
-                    GameManager.Instance?.OnRemotePlayerMoved(move.playerSlot, new Vector2(move.posX, move.posY));
+                    MovePayload d = JsonUtility.FromJson<MovePayload>(msg.payload);
+                    gm?.OnRemotePlayerMoved(d.playerSlot, new Vector2(d.posX, d.posY));
+                    break;
+                }
+
+            case "ITEM_PICKED_UP":
+                {
+                    ItemPickedPayload d = JsonUtility.FromJson<ItemPickedPayload>(msg.payload);
+                    gm?.OnItemPickedUp(d.itemID, d.playerSlot, (ItemType)d.itemType);
+                    break;
+                }
+
+            case "ITEM_SPAWNED":
+                {
+                    ItemSpawnedPayload d = JsonUtility.FromJson<ItemSpawnedPayload>(msg.payload);
+                    gm?.OnItemSpawned(d.itemID, d.posX, d.posY, (ItemType)d.itemType);
+                    break;
+                }
+
+            case "SCORE_UPDATE":
+                {
+                    ScoreUpdatePayload d = JsonUtility.FromJson<ScoreUpdatePayload>(msg.payload);
+                    gm?.OnScoreUpdate(d.slots, d.scores, d.items);
+                    break;
+                }
+
+            case "CHARGES":
+                {
+                    ChargesPayload d = JsonUtility.FromJson<ChargesPayload>(msg.payload);
+                    gm?.OnChargesUpdate(d.speedCharges, d.freezeCharges);
+                    break;
+                }
+
+            case "POWERUP_USED":
+                {
+                    PowerUpUsedPayload d = JsonUtility.FromJson<PowerUpUsedPayload>(msg.payload);
+                    gm?.OnPowerUpUsed(d.senderSlot, d.targetSlot, d.powerUpType, d.duration);
                     break;
                 }
 
             case "PLAYER_LEFT":
                 {
-                    JoinPayload left = JsonUtility.FromJson<JoinPayload>(msg.payload);
-                    GameManager.Instance?.OnPlayerLeft(left.playerSlot);
+                    PlayerLeftPayload d = JsonUtility.FromJson<PlayerLeftPayload>(msg.payload);
+                    gm?.OnPlayerLeft(d.playerSlot);
                     break;
                 }
 
             case "GAME_OVER":
-                {
-                    GameManager.Instance?.OnGameOver();
-                    break;
-                }
+                gm?.OnGameOver();
+                break;
 
             case "RESULTS":
                 {
-                    ResultsPayload results = JsonUtility.FromJson<ResultsPayload>(msg.payload);
-                    GameManager.Instance?.OnResults(results.slots, results.scores);
+                    ResultsPayload d = JsonUtility.FromJson<ResultsPayload>(msg.payload);
+                    gm?.OnResults(d);
                     break;
                 }
         }
@@ -243,7 +301,9 @@ public class SocketClient : MonoBehaviour
 
     private void OnApplicationQuit()
     {
+        leavingOnPurpose = true;
         connected = false;
-        if (client != null) client.Close();
+        try { client?.Close(); } catch (Exception) { }
+        if (GameServer.IsRunning) GameServer.StopServer();
     }
 }

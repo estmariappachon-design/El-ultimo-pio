@@ -2,9 +2,9 @@ using UnityEngine;
 
 public enum ItemType
 {
-    Normal,     // Suma puntos
-    SpeedBoost, // Otorga Turbo de velocidad al jugador
-    Freeze      // Otorga la habilidad de congelar al rival
+    Normal = 0,     // +1 punto
+    SpeedBoost = 1, // +2 puntos y 1 carga de TURBO
+    Freeze = 2      // +2 puntos y 1 carga de HIELO
 }
 
 public class CollectibleItem : MonoBehaviour
@@ -12,34 +12,78 @@ public class CollectibleItem : MonoBehaviour
     public int itemID;
     public ItemType type = ItemType.Normal;
 
+    [Header("Animaci贸n (flotar y brillar)")]
+    [SerializeField] private float floatHeight = 0.3f;
+    [SerializeField] private float floatSpeed = 2.5f;
+    [SerializeField] private float pulseAmount = 0.08f;
+    [SerializeField] private float wobbleDegrees = 8f;
+
     private bool requested = false;
+    private Vector3 basePos;
+    private Vector3 baseScale;
+    private float phaseOffset;
+    private float spawnAnim = 1f; // 0 -> 1 cuando aparece (reaparici贸n)
+    private const float SpawnDuration = 0.35f;
+
+    // Al reaparecer en otro lugar: crece desde cero con un peque帽o rebote
+    public void PlaySpawnAnimation()
+    {
+        spawnAnim = 0f;
+    }
 
     private void Awake()
     {
-        // Garantiza que el ma韟 sea un Trigger aunque el prefab no lo tenga marcado
         Collider2D col = GetComponent<Collider2D>();
         if (col != null) col.isTrigger = true;
     }
 
-    private void OnTriggerEnter2D(Collider2D other)
+    private void Start()
     {
-        if (requested) return;
+        basePos = transform.position;
+        baseScale = transform.localScale;
+        phaseOffset = itemID * 0.73f; // cada ma铆z se mueve a destiempo
+    }
 
-        // Detecta al jugador por su script, sin depender del Tag
-        PlayerController player = other.GetComponentInParent<PlayerController>();
-        if (player == null || !player.isLocalPlayer) return;
+    private void Update()
+    {
+        float t = Time.time * floatSpeed + phaseOffset;
+        bool special = type != ItemType.Normal;
 
-        if (GameManager.Instance == null)
+        transform.position = basePos + Vector3.up * (Mathf.Sin(t) * floatHeight);
+        transform.rotation = Quaternion.Euler(0f, 0f, Mathf.Sin(t * 0.8f) * wobbleDegrees);
+
+        // Los especiales "laten" m谩s fuerte para distinguirse a distancia
+        float pulse = 1f + Mathf.Sin(t * 2f) * pulseAmount * (special ? 2.5f : 1f);
+
+        if (spawnAnim < 1f)
         {
-            Debug.LogWarning("CollectibleItem: no hay GameManager en la escena.");
-            return;
+            spawnAnim = Mathf.Min(1f, spawnAnim + Time.deltaTime / SpawnDuration);
+            // "Ease out back": pasa un poco del tama帽o final y vuelve
+            float k = spawnAnim - 1f;
+            pulse *= 1f + 2.7f * k * k * k + 1.7f * k * k;
         }
 
-        requested = true;
-        GameManager.Instance.SendPickupRequest(itemID, type);
+        transform.localScale = baseScale * pulse;
+    }
 
-        // Si el servidor no responde, permite reintentar despu閟 de 1 segundo
-        Invoke(nameof(ResetRequest), 1f);
+    private void OnTriggerEnter2D(Collider2D other) { TryRequest(other); }
+
+    // Por si el pollo ya estaba encima del ma铆z cuando se liber贸 el movimiento o se descongel贸
+    private void OnTriggerStay2D(Collider2D other) { TryRequest(other); }
+
+    private void TryRequest(Collider2D other)
+    {
+        if (requested || spawnAnim < 1f) return; // no se puede coger mientras aparece
+
+        PlayerController player = other.GetComponentInParent<PlayerController>();
+        if (player == null || !player.isLocalPlayer || player.IsFrozen) return;
+        if (GameManager.Instance == null) return;
+
+        requested = true;
+        GameManager.Instance.SendPickupRequest(itemID);
+
+        // Si el servidor lo rechaza (otro lleg贸 primero o hubo retraso), se puede reintentar
+        Invoke(nameof(ResetRequest), 0.5f);
     }
 
     private void ResetRequest()
