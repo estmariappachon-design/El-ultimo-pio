@@ -42,7 +42,9 @@ public class LobbyCustomization : MonoBehaviour
 
     [Header("Aviso al guardar (opcional)")]
     [SerializeField] private string savedMessage = "¡Guardado!";
-    [SerializeField] private Color savedColor = new Color(1f, 0.85f, 0.2f);
+    [SerializeField] private Color savedTextColor = Color.black;
+    [SerializeField] private Color savedOutlineColor = Color.white;
+    [SerializeField, Range(0f, 0.5f)] private float savedOutlineWidth = 0.2f;
 
     private int localPlayerSlot = 0;
     private int confirmedChicken = 0; // el que tiene el servidor
@@ -382,9 +384,9 @@ public class LobbyCustomization : MonoBehaviour
         t.fontSize = 40f;
         t.fontStyle = FontStyles.Bold;
         t.alignment = TextAlignmentOptions.Center;
-        t.color = savedColor;
-        t.outlineWidth = 0.2f;
-        t.outlineColor = new Color32(0, 0, 0, 220);
+        t.color = savedTextColor;
+        t.outlineWidth = savedOutlineWidth;
+        t.outlineColor = savedOutlineColor;
         t.raycastTarget = false;
 
         StartCoroutine(FadeAndDestroy(t, rt, 1.2f));

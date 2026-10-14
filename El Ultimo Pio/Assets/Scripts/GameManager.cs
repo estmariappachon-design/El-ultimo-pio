@@ -56,6 +56,12 @@ public class GameManager : MonoBehaviour
     }; // solo se usan si no hay sprite asignado
     [SerializeField] private float nameLabelHeight = 4f;
 
+    [Header("Color de textos: emergentes, avisos, ranking final, contadores x2 y etiquetas TÚ/J2")]
+    [SerializeField] private Color popupTextColor = Color.black;
+    [Tooltip("Borde de las letras, para que se lean sobre el terreno")]
+    [SerializeField] private Color popupOutlineColor = Color.white;
+    [SerializeField, Range(0f, 0.5f)] private float popupOutlineWidth = 0.2f;
+
     [Header("Pantalla de resultados")]
     [Tooltip("Todos los textos de la pantalla final. Despliega para editarlos")]
     [SerializeField] private ResultsTexts resultsTexts = new ResultsTexts();
@@ -69,6 +75,12 @@ public class GameManager : MonoBehaviour
     [SerializeField] private Vector2 resultsImageOffset = new Vector2(0f, 60f);
     [Tooltip("Mantener la forma original de la imagen (no estirarla)")]
     [SerializeField] private bool resultsImageKeepAspect = true;
+
+    [Header("Tipografía de la pantalla final")]
+    [Tooltip("Font Asset de TextMeshPro (ej. CormorantGaramond-Bold SDF). Vacío = la fuente por defecto")]
+    [SerializeField] private TMP_FontAsset resultsFont;
+    [Tooltip("Usar también esa fuente en los textos de los botones rectangulares")]
+    [SerializeField] private bool resultsFontOnButtons = true;
 
     [Header("Ranking dentro de la imagen (posiciones relativas a la imagen: 0,0 = centro; 0.5 = borde)")]
     [SerializeField] private Vector2 rankingPosition = new Vector2(0f, -0.06f);
@@ -153,6 +165,7 @@ public class GameManager : MonoBehaviour
         audioSource.playOnAwake = false;
 
         EnsureHud();
+        ApplyPopupStyle();
 
         localPlayer = FindLocalPlayer();
         if (localPlayer == null)
@@ -653,9 +666,9 @@ public class GameManager : MonoBehaviour
         tmp.fontSize = 22f;
         tmp.fontStyle = FontStyles.Bold;
         tmp.alignment = TextAlignmentOptions.Center;
-        tmp.color = color;
-        tmp.outlineWidth = 0.2f;
-        tmp.outlineColor = new Color32(0, 0, 0, 220);
+        tmp.color = popupTextColor;          // etiquetas "TÚ" / "J2"
+        tmp.outlineWidth = popupOutlineWidth;
+        tmp.outlineColor = popupOutlineColor;
         tmp.sortingOrder = 250;
         tmp.rectTransform.sizeDelta = new Vector2(20f, 5f);
     }
@@ -703,9 +716,12 @@ public class GameManager : MonoBehaviour
             bool me = list[i].Key == MySlot;
             string name = me ? "Tú" : "J" + (list[i].Key + 1);
             string line = (i + 1) + ". " + name + "  " + list[i].Value;
-            sb.AppendLine(me ? "<color=#FFD54A>" + line + "</color>" : line);
+            sb.AppendLine(me ? "<b>" + line + "</b>" : line); // mi fila en negrita
         }
         rankingText.text = sb.ToString();
+        rankingText.color = popupTextColor;
+        rankingText.outlineColor = popupOutlineColor;
+        rankingText.outlineWidth = popupOutlineWidth;
     }
 
     private void RefreshPowerUpButtons()
@@ -734,11 +750,27 @@ public class GameManager : MonoBehaviour
         fb.SetDimmed(!active);
     }
 
+    private void ApplyPopupStyle()
+    {
+        GameFx.PopupColor = popupTextColor;
+        GameFx.PopupOutlineColor = popupOutlineColor;
+        GameFx.PopupOutlineWidth = popupOutlineWidth;
+
+        if (statusText != null)
+        {
+            statusText.color = popupTextColor;
+            statusText.outlineColor = popupOutlineColor;
+            statusText.outlineWidth = popupOutlineWidth;
+            statusText.fontStyle = FontStyles.Bold;
+        }
+    }
+
+    // El parámetro color se ignora: todos los avisos usan Popup Text Color
     private void ShowStatus(string text, float seconds, Color color)
     {
         if (statusText == null) return;
         statusText.text = text;
-        statusText.color = color;
+        statusText.color = popupTextColor;
         statusUntil = Time.time + seconds;
     }
 
@@ -750,12 +782,12 @@ public class GameManager : MonoBehaviour
         if (gameActive && localPlayer != null && localPlayer.IsFrozen)
         {
             statusText.text = "¡CONGELADO!";
-            statusText.color = new Color(0.5f, 0.85f, 1f);
+            statusText.color = popupTextColor;
         }
         else if (gameActive && localPlayer != null && localPlayer.IsBoosted)
         {
             statusText.text = "TURBO ACTIVO";
-            statusText.color = new Color(1f, 0.85f, 0.2f);
+            statusText.color = popupTextColor;
         }
         else
         {
@@ -807,8 +839,9 @@ public class GameManager : MonoBehaviour
             new Vector2(1f, 1f), new Vector2(10f, 10f), new Vector2(110f, 60f), 40f,
             TextAlignmentOptions.TopRight);
         t.fontStyle = FontStyles.Bold;
-        t.outlineWidth = 0.25f;
-        t.outlineColor = new Color32(0, 0, 0, 255);
+        t.color = popupTextColor;            // contadores "x2" de los botones
+        t.outlineWidth = popupOutlineWidth;
+        t.outlineColor = popupOutlineColor;
         t.raycastTarget = false;
         return t;
     }
@@ -953,10 +986,11 @@ public class GameManager : MonoBehaviour
             rank.enableAutoSizing = true;
             rank.fontSizeMin = 10f;
             rank.fontSizeMax = txt.rankingFontSize;
-            rank.color = txt.textColor;
+            rank.color = popupTextColor;         // ranking final
             rank.outlineWidth = txt.rankingOutline;
-            rank.outlineColor = new Color32(0, 0, 0, 200);
+            rank.outlineColor = popupOutlineColor;
             rank.text = sb.ToString().TrimEnd();
+            if (resultsFont != null) rank.font = resultsFont;
 
             if (imageHasButtons)
             {
@@ -976,7 +1010,8 @@ public class GameManager : MonoBehaviour
             tmp.fontSizeMin = 18f;
             tmp.fontSizeMax = 52f;
             tmp.text = sb.ToString();
-            tmp.color = txt.textColor;
+            tmp.color = popupTextColor;
+            if (resultsFont != null) tmp.font = resultsFont;
         }
 
         CreatePanelButton(panel.transform, "BtnJugarOtraVez", txt.playAgainButton, new Vector2(-260f, 60f),
@@ -1098,6 +1133,7 @@ public class GameManager : MonoBehaviour
         TextMeshProUGUI t = CreateUIText(btnObj.transform, "Texto", new Vector2(0.5f, 0.5f), Vector2.zero,
             new Vector2(440f, 110f), 40f, TextAlignmentOptions.Center);
         t.text = label;
+        if (resultsFont != null && resultsFontOnButtons) t.font = resultsFont;
     }
 
     private void BackToLobby()
@@ -1175,7 +1211,6 @@ public class ResultsTexts
     public string menuButton = "Menú principal";
 
     [Header("Estilo")]
-    public Color textColor = Color.white;
     [Tooltip("Mostrar los títulos (¡GANASTE!...) aunque haya imagen. Déjalo apagado si la imagen ya los trae")]
     public bool showTitlesOverImage = false;
     [Tooltip("Mostrar la nota del desempate")]

@@ -6,6 +6,11 @@ using UnityEngine;
 //  - Texto flotante: "+1", "+2 ¡TURBO!", "¡CONGELADO!" sobre el pollo
 public static class GameFx
 {
+    // Estilo de TODOS los textos emergentes (lo configura GameManager desde el Inspector)
+    public static Color PopupColor = Color.black;
+    public static Color PopupOutlineColor = Color.white;
+    public static float PopupOutlineWidth = 0.2f;
+
     public static void Pop(SpriteRenderer source, float duration = 0.3f)
     {
         if (source == null || source.sprite == null) return;
@@ -35,9 +40,9 @@ public static class GameFx
         tmp.fontSize = size;
         tmp.fontStyle = FontStyles.Bold;
         tmp.alignment = TextAlignmentOptions.Center;
-        tmp.color = color;
-        tmp.outlineWidth = 0.25f;
-        tmp.outlineColor = new Color32(0, 0, 0, 200);
+        tmp.color = PopupColor; // todos los emergentes usan el mismo color
+        tmp.outlineWidth = PopupOutlineWidth;
+        tmp.outlineColor = PopupOutlineColor;
         tmp.sortingOrder = 300;
         tmp.rectTransform.sizeDelta = new Vector2(60f, 12f);
 
