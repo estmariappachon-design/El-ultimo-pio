@@ -12,6 +12,10 @@ public class LobbyNetworkManager : MonoBehaviour
     [Header("UI Info Red")]
     [SerializeField] private TextMeshProUGUI roomIPText; // Text_IP_Sala
 
+    [Header("Textos de la sala ({code} = código completo, {short} = final del código, {n} = jugadores)")]
+    [TextArea] [SerializeField] private string hostRoomFormat = "CÓDIGO DE SALA: {code}\nEn la misma Wi-Fi basta: {short}\nJugadores: {n}/4";
+    [TextArea] [SerializeField] private string clientRoomFormat = "Sala {code}\nJugadores: {n}/4";
+
     [Header("Escenas")]
     [SerializeField] private string mainMenuSceneName = "MainMenu";
 
@@ -45,12 +49,14 @@ public class LobbyNetworkManager : MonoBehaviour
     {
         if (roomIPText == null) return;
 
-        string count = "Jugadores: " + playerCount + "/" + GameServer.MaxPlayers;
+        // El anfitrión muestra el código de SU IP; los demás, el de la sala a la que se unieron
+        string ip = GameServer.IsRunning ? IPManager.GetLocalIPAddress() : SocketClient.Instance.serverIP;
+        string format = GameServer.IsRunning ? hostRoomFormat : clientRoomFormat;
 
-        if (GameServer.IsRunning)
-            roomIPText.text = "IP DE LA SALA: " + IPManager.GetLocalIPAddress() + "\n" + count;
-        else
-            roomIPText.text = "Conectado a: " + SocketClient.Instance.serverIP + "\n" + count;
+        roomIPText.text = format
+            .Replace("{code}", RoomCode.FromIP(ip))
+            .Replace("{short}", RoomCode.ShortFromIP(ip))
+            .Replace("{n}", playerCount.ToString());
     }
 
     // occupiedSlots: slots realmente ocupados

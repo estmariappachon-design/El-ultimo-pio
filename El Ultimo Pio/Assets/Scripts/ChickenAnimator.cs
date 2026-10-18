@@ -135,6 +135,14 @@ public class ChickenAnimator : MonoBehaviour
     }
 
     public void SetTurbo(float duration)  { turboUntil = Time.time + duration; }
+
+    // Después de un teletransporte: que el salto de posición no cuente como "caminar"
+    public void ResetMotion()
+    {
+        lastPos = transform.position;
+        smoothedSpeed = 0f;
+        if (trail != null) trail.Clear();
+    }
     public void SetFrozen(float duration) { frozenUntil = Time.time + duration; }
     public bool IsFrozenVisual => Time.time < frozenUntil;
 

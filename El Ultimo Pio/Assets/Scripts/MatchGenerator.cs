@@ -22,6 +22,10 @@ public static class MatchGenerator
     public const int TypeNormal = 0;
     public const int TypeSpeed = 1;
     public const int TypeFreeze = 2;
+    public const int TypeTeleport = 3;
+
+    // El maíz de teletransporte usa un número fuera de los 50 normales
+    public const int TeleportItemID = TotalItems;
 
     public static void GenerateSpawns(Random rng, int count, float[] xs, float[] ys)
     {

@@ -6,10 +6,7 @@ using UnityEngine;
 //  - Texto flotante: "+1", "+2 ¡TURBO!", "¡CONGELADO!" sobre el pollo
 public static class GameFx
 {
-    // Estilo de TODOS los textos emergentes (lo configura GameManager desde el Inspector)
-    public static Color PopupColor = Color.black;
-    public static Color PopupOutlineColor = Color.white;
-    public static float PopupOutlineWidth = 0.2f;
+    // El estilo de los textos emergentes se edita en Assets/Resources/EstiloTextos > Popups
 
     public static void Pop(SpriteRenderer source, float duration = 0.3f)
     {
@@ -30,19 +27,16 @@ public static class GameFx
         fade.Init(duration, 1.8f, Vector3.zero, sr, null);
     }
 
-    public static void FloatingText(Vector3 worldPos, string text, Color color, float size = 35f, float duration = 0.9f)
+    // color y size se ignoran: se usan los de EstiloTextos (así todos los emergentes se ven iguales)
+    public static void FloatingText(Vector3 worldPos, string text, Color color, float size = 0f, float duration = 0.9f)
     {
         GameObject go = new GameObject("FX_Text");
         go.transform.position = worldPos + Vector3.up * 2f;
 
         TextMeshPro tmp = go.AddComponent<TextMeshPro>();
         tmp.text = text;
-        tmp.fontSize = size;
-        tmp.fontStyle = FontStyles.Bold;
         tmp.alignment = TextAlignmentOptions.Center;
-        tmp.color = PopupColor; // todos los emergentes usan el mismo color
-        tmp.outlineWidth = PopupOutlineWidth;
-        tmp.outlineColor = PopupOutlineColor;
+        TextStyle.Current.Apply(tmp, TextStyle.Current.popups);
         tmp.sortingOrder = 300;
         tmp.rectTransform.sizeDelta = new Vector2(60f, 12f);
 

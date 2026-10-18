@@ -123,6 +123,24 @@ public class AudioManager : MonoBehaviour
         if (fadeRoutine == null) musicSource.volume = musicVolume;
     }
 
+    // Baja la música de fondo un rato (por ejemplo mientras suena la canción del teletransporte)
+    private Coroutine duckRoutine;
+
+    public void DuckMusic(float seconds, float volumeFactor = 0.25f)
+    {
+        if (musicSource == null) return;
+        if (duckRoutine != null) StopCoroutine(duckRoutine);
+        duckRoutine = StartCoroutine(DuckRoutine(seconds, volumeFactor));
+    }
+
+    private IEnumerator DuckRoutine(float seconds, float factor)
+    {
+        if (fadeRoutine == null) musicSource.volume = musicVolume * factor;
+        yield return new WaitForSecondsRealtime(seconds);
+        if (fadeRoutine == null) musicSource.volume = musicVolume;
+        duckRoutine = null;
+    }
+
     // =================================================================================
     //  Botones
     // =================================================================================

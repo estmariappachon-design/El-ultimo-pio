@@ -32,7 +32,7 @@ public static class GameServer
     public const int DefaultPort = 8888;
     public const int MaxPlayers = 4;
     public static int MinPlayers = 2;               // se puede bajar a 1 SOLO para pruebas
-    public static int GameDurationSeconds = 120;    // duración de la partida
+    public static int GameDurationSeconds = 60;    // duración de la partida
 
     public static int PointsNormal = 1;             // maíz normal
     public static int PointsSpecial = 2;            // maíz arcoíris o de hielo
@@ -40,6 +40,11 @@ public static class GameServer
     public static float SpeedDuration = 5f;         // segundos de turbo (doc: 3 a 6)
     public static float FreezeDuration = 3f;        // segundos congelado (doc: 2 a 4)
     public static float PowerUpCooldown = 2f;       // segundos entre usos de power-ups
+
+    // Teletransporte (los cambia MainMenuManager desde el Inspector)
+    public static float TeleportSpawnInterval = 20f; // cada cuántos segundos aparece el maíz de teletransporte
+    public static float TeleportLifetime = 8f;       // segundos que dura en pantalla si nadie lo coge
+    public static int TeleportPoints = 5;            // puntos por cogerlo
     public static float MaxPickupDistance = 6f;     // validación anti-trampa del servidor
     public static bool RespawnItems = true;         // el maíz recogido reaparece en otro lugar
     public static float SpecialRespawnDelay = 15f;  // segundos que tarda en reaparecer un maíz ESPECIAL (0 = al instante)
@@ -72,6 +77,11 @@ public static class GameServer
     private static Timer gameTimer;
     private static readonly List<Timer> respawnTimers = new List<Timer>(); // reaparición con retraso
     private static int matchId = 0; // evita que un temporizador de la partida anterior afecte a la nueva
+
+    private static Timer teleportTimer;
+    private static bool teleportActive;
+    private static float teleportX, teleportY;
+    private static int teleportSpawnCount; // para que un "expirar" viejo no borre uno nuevo
 
     public static bool IsRunning => running;
 
@@ -206,6 +216,8 @@ public static class GameServer
         if (gameTimer != null) { gameTimer.Dispose(); gameTimer = null; }
         foreach (Timer t in respawnTimers) t.Dispose();
         respawnTimers.Clear();
+        if (teleportTimer != null) { teleportTimer.Dispose(); teleportTimer = null; }
+        teleportActive = false;
         matchId++;
     }
 
@@ -315,13 +327,15 @@ public static class GameServer
     // Cargas de power-up de UN jugador
     private static void SendCharges(ClientHandler c)
     {
-        int speed, freeze;
+        int speed, freeze, teleport;
         lock (stateLock)
         {
             speed = c.SpeedCharges;
             freeze = c.FreezeCharges;
+            teleport = c.TeleportCharges;
         }
-        c.Send(BuildMessage("CHARGES", "{\"speedCharges\":" + speed + ",\"freezeCharges\":" + freeze + "}"));
+        c.Send(BuildMessage("CHARGES", "{\"speedCharges\":" + speed + ",\"freezeCharges\":" + freeze +
+                                       ",\"teleportCharges\":" + teleport + "}"));
     }
 
     // =================================================================================
@@ -375,6 +389,8 @@ public static class GameServer
                     y = Math.Max(-limit, Math.Min(limit, y));
                     lock (stateLock)
                     {
+                        // Justo después de un teletransporte se ignoran las posiciones viejas que venían en camino
+                        if (DateTime.UtcNow < from.IgnoreMovesUntil) break;
                         from.PosX = x;
                         from.PosY = y;
                     }
@@ -390,7 +406,10 @@ public static class GameServer
 
             case "USE_POWERUP":
                 if (TryReadString(line, "powerUpType", out string powerUp))
-                    ProcessPowerUp(from, powerUp);
+                {
+                    if (!TryReadInt(line, "targetSlot", out int targetSlot)) targetSlot = -1;
+                    ProcessPowerUp(from, powerUp, targetSlot);
+                }
                 break;
         }
     }
@@ -458,6 +477,13 @@ public static class GameServer
 
             if (readyTimer != null) { readyTimer.Dispose(); readyTimer = null; }
             gameTimer = new Timer(_ => EndGame(), null, GameDurationSeconds * 1000, Timeout.Infinite);
+
+            // El maíz de teletransporte aparece cada TeleportSpawnInterval segundos
+            if (TeleportSpawnInterval > 0f)
+            {
+                int ms = (int)(TeleportSpawnInterval * 1000f), match = matchId;
+                teleportTimer = new Timer(_ => SpawnTeleport(match), null, ms, ms);
+            }
         }
 
         Log("[Servidor] Comienza la cuenta de " + GameDurationSeconds + " s");
@@ -521,6 +547,11 @@ public static class GameServer
     // RESOLUCIÓN DE CONFLICTOS: el primer pedido que llega al servidor se queda con el maíz.
     private static void ProcessPickupRequest(ClientHandler from, int itemID)
     {
+        if (itemID == MatchGenerator.TeleportItemID)
+        {
+            ProcessTeleportPickup(from);
+            return;
+        }
         if (itemID < 0 || itemID >= MatchGenerator.TotalItems) return;
 
         int type;
@@ -619,8 +650,72 @@ public static class GameServer
         Broadcast(message);
     }
 
+    // ---------- Maíz de teletransporte ----------
+
+    private static void SpawnTeleport(int match)
+    {
+        string message;
+        int spawnId;
+        lock (stateLock)
+        {
+            if (match != matchId || !gameBegan || gameOver || teleportActive) return;
+
+            float[] px = new float[clients.Count], py = new float[clients.Count];
+            for (int k = 0; k < clients.Count; k++) { px[k] = clients[k].PosX; py[k] = clients[k].PosY; }
+            MatchGenerator.RandomRespawnPosition(rng, -1, itemX, itemY, MatchGenerator.TotalItems,
+                                                 px, py, clients.Count, out teleportX, out teleportY);
+            teleportActive = true;
+            spawnId = ++teleportSpawnCount;
+
+            // Si nadie lo coge en TeleportLifetime segundos, desaparece
+            Timer t = new Timer(_ => ExpireTeleport(match, spawnId), null, (int)(TeleportLifetime * 1000f), Timeout.Infinite);
+            respawnTimers.Add(t);
+
+            message = BuildMessage("TELEPORT_SPAWNED",
+                "{\"itemID\":" + MatchGenerator.TeleportItemID + ",\"posX\":" + F(teleportX) +
+                ",\"posY\":" + F(teleportY) + ",\"duration\":" + F(TeleportLifetime) + "}");
+        }
+        Log("[Servidor] Apareció el maíz de teletransporte");
+        Broadcast(message);
+    }
+
+    private static void ExpireTeleport(int match, int spawnId)
+    {
+        lock (stateLock)
+        {
+            if (match != matchId || !teleportActive || spawnId != teleportSpawnCount) return;
+            teleportActive = false;
+        }
+        Broadcast(BuildMessage("ITEM_EXPIRED", "{\"itemID\":" + MatchGenerator.TeleportItemID + "}"));
+    }
+
+    private static void ProcessTeleportPickup(ClientHandler from)
+    {
+        lock (stateLock)
+        {
+            if (!gameBegan || gameOver || !teleportActive) return;
+            if (DateTime.UtcNow < from.FrozenUntil) return;
+
+            // Es más grande que los demás maíces: se acepta un poco más lejos
+            float dx = teleportX - from.PosX, dy = teleportY - from.PosY;
+            if (Math.Sqrt(dx * dx + dy * dy) > MaxPickupDistance * 2.5f) return;
+
+            teleportActive = false;
+            from.Score += TeleportPoints;
+            from.Items++;
+            from.Specials++;
+            if (from.TeleportCharges < MaxCharges) from.TeleportCharges++;
+        }
+
+        Broadcast(BuildMessage("ITEM_PICKED_UP",
+            "{\"playerSlot\":" + from.Slot + ",\"itemID\":" + MatchGenerator.TeleportItemID +
+            ",\"itemType\":" + MatchGenerator.TypeTeleport + "}"));
+        Broadcast(BuildScoreUpdate());
+        SendCharges(from);
+    }
+
     // SPEED: turbo para quien lo usa. FREEZE: congela al rival MÁS CERCANO que no esté congelado.
-    private static void ProcessPowerUp(ClientHandler from, string powerUp)
+    private static void ProcessPowerUp(ClientHandler from, string powerUp, int targetSlot)
     {
         string message = null;
         lock (stateLock)
@@ -649,6 +744,34 @@ public static class GameServer
                     target.FrozenUntil = now.AddSeconds(FreezeDuration);
                     message = BuildPowerUpMessage(from.Slot, target.Slot, "FREEZE", FreezeDuration);
                     Log("[Servidor] Jugador " + from.Slot + " congeló al jugador " + target.Slot);
+                }
+            }
+            else if (powerUp == "TELEPORT" && from.TeleportCharges > 0)
+            {
+                // El jugador escoge con quién cambiar; si no escogió (o no existe), el rival más cercano
+                ClientHandler target = null;
+                foreach (var c in clients)
+                    if (c != from && c.Slot == targetSlot) { target = c; break; }
+                if (target == null) target = FindNearestRival(from, DateTime.MaxValue);
+
+                if (target != null)
+                {
+                    from.TeleportCharges--;
+                    from.NextPowerUpTime = now.AddSeconds(PowerUpCooldown);
+
+                    // Intercambio de posiciones
+                    float ax = from.PosX, ay = from.PosY;
+                    from.PosX = target.PosX; from.PosY = target.PosY;
+                    target.PosX = ax; target.PosY = ay;
+
+                    from.IgnoreMovesUntil = now.AddSeconds(0.4);
+                    target.IgnoreMovesUntil = now.AddSeconds(0.4);
+
+                    message = BuildMessage("TELEPORT_SWAP",
+                        "{\"slotA\":" + from.Slot + ",\"slotB\":" + target.Slot +
+                        ",\"aX\":" + F(from.PosX) + ",\"aY\":" + F(from.PosY) +
+                        ",\"bX\":" + F(target.PosX) + ",\"bY\":" + F(target.PosY) + "}");
+                    Log("[Servidor] Jugador " + from.Slot + " cambió de lugar con el jugador " + target.Slot);
                 }
             }
         }
@@ -755,7 +878,8 @@ public class ClientHandler
     // Datos de la partida (los protege el stateLock del GameServer)
     public float PosX, PosY;
     public int Score, Items, Specials;
-    public int SpeedCharges, FreezeCharges;
+    public int SpeedCharges, FreezeCharges, TeleportCharges;
+    public DateTime IgnoreMovesUntil = DateTime.MinValue;
     public DateTime NextPowerUpTime = DateTime.MinValue;
     public DateTime FrozenUntil = DateTime.MinValue;
 
@@ -774,7 +898,8 @@ public class ClientHandler
     public void ResetMatchStats()
     {
         Score = Items = Specials = 0;
-        SpeedCharges = FreezeCharges = 0;
+        SpeedCharges = FreezeCharges = TeleportCharges = 0;
+        IgnoreMovesUntil = DateTime.MinValue;
         NextPowerUpTime = DateTime.MinValue;
         FrozenUntil = DateTime.MinValue;
     }

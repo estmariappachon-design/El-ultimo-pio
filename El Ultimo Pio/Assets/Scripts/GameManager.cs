@@ -21,6 +21,8 @@ public class GameManager : MonoBehaviour
     [SerializeField] private GameObject maizNormalPrefab;
     [SerializeField] private GameObject maizVelocidadPrefab;
     [SerializeField] private GameObject maizCongelarPrefab;
+    [Tooltip("Maíz de TELETRANSPORTE (aparece cada 20 s y dura 8 s)")]
+    [SerializeField] private GameObject maizTeleportPrefab;
 
     [Header("UI Gameplay (los opcionales se crean solos si se dejan vacíos)")]
     [SerializeField] private TextMeshProUGUI timerText;
@@ -33,6 +35,7 @@ public class GameManager : MonoBehaviour
     [Header("Botones de Power-Up")]
     [SerializeField] private Button btnTurbo;
     [SerializeField] private Button btnCongelar;
+    [SerializeField] private Button btnTeleport;
     [SerializeField] private Color buttonOnColor = Color.white;
     [SerializeField] private Color buttonOffColor = new Color(0.35f, 0.35f, 0.35f, 0.5f);
 
@@ -50,17 +53,13 @@ public class GameManager : MonoBehaviour
     [Header("Maíces")]
     [Tooltip("Tamaño de los maíces respecto al prefab (1 = igual, 0.6 = 60 %)")]
     [SerializeField, Range(0.2f, 1.5f)] private float itemScale = 0.6f;
+    [Tooltip("Tamaño del maíz de TELETRANSPORTE respecto a su prefab (1 = igual, 2 = el doble)")]
+    [SerializeField, Range(0.2f, 5f)] private float teleportItemScale = 1.6f;
     [SerializeField] private Color[] playerColors =
     {
         Color.yellow, Color.cyan, Color.green, new Color(1f, 0.5f, 0f)
     }; // solo se usan si no hay sprite asignado
     [SerializeField] private float nameLabelHeight = 4f;
-
-    [Header("Color de textos: emergentes, avisos, ranking final, contadores x2 y etiquetas TÚ/J2")]
-    [SerializeField] private Color popupTextColor = Color.black;
-    [Tooltip("Borde de las letras, para que se lean sobre el terreno")]
-    [SerializeField] private Color popupOutlineColor = Color.white;
-    [SerializeField, Range(0f, 0.5f)] private float popupOutlineWidth = 0.2f;
 
     [Header("Pantalla de resultados")]
     [Tooltip("Todos los textos de la pantalla final. Despliega para editarlos")]
@@ -75,12 +74,6 @@ public class GameManager : MonoBehaviour
     [SerializeField] private Vector2 resultsImageOffset = new Vector2(0f, 60f);
     [Tooltip("Mantener la forma original de la imagen (no estirarla)")]
     [SerializeField] private bool resultsImageKeepAspect = true;
-
-    [Header("Tipografía de la pantalla final")]
-    [Tooltip("Font Asset de TextMeshPro (ej. CormorantGaramond-Bold SDF). Vacío = la fuente por defecto")]
-    [SerializeField] private TMP_FontAsset resultsFont;
-    [Tooltip("Usar también esa fuente en los textos de los botones rectangulares")]
-    [SerializeField] private bool resultsFontOnButtons = true;
 
     [Header("Ranking dentro de la imagen (posiciones relativas a la imagen: 0,0 = centro; 0.5 = borde)")]
     [SerializeField] private Vector2 rankingPosition = new Vector2(0f, -0.06f);
@@ -109,11 +102,25 @@ public class GameManager : MonoBehaviour
     [SerializeField] private AudioClip frozenClip;   // me congelaron
     [SerializeField] private AudioClip endClip;      // fin de partida
 
+    [Header("Teletransporte")]
+    [Tooltip("Canción que suena cuando APARECE el maíz de teletransporte")]
+    [SerializeField] private AudioClip teleportSpawnClip;
+    [Tooltip("Sonido al cambiar de lugar")]
+    [SerializeField] private AudioClip teleportUseClip;
+    [Tooltip("Bajar la música de fondo mientras suena la canción del teletransporte")]
+    [SerializeField] private bool duckMusicOnTeleport = true;
+    [Tooltip("Título del panel para escoger rival")]
+    [SerializeField] private string teleportPickerTitle = "¿Con quién cambias de lugar?";
+    [Tooltip("Segundos que queda abierto el panel si no escoges a nadie")]
+    [SerializeField] private float teleportPickerTimeout = 5f;
+
     // ---------- Estado ----------
     private int myScore = 0;
     private int myItems = 0;
     private int turboCharges = 0;
     private int freezeCharges = 0;
+    private int teleportCharges = 0;
+    private GameObject teleportPicker;
     private float gameTime;
     private bool gameActive = false;
     private bool gameOverHandled = false;
@@ -124,6 +131,7 @@ public class GameManager : MonoBehaviour
     private AudioSource audioSource;
     private TextMeshProUGUI turboBadge;
     private TextMeshProUGUI freezeBadge;
+    private TextMeshProUGUI teleportBadge;
 
     private readonly Dictionary<int, CollectibleItem> items = new Dictionary<int, CollectibleItem>();
     private readonly Dictionary<int, RemotePlayer> remotePlayers = new Dictionary<int, RemotePlayer>();
@@ -132,6 +140,10 @@ public class GameManager : MonoBehaviour
 
     private float moveSendTimer = 0f;
     private Vector2 lastSentPos;
+
+    // Fuente, tamaños y colores de los textos: archivo Assets/Resources/EstiloTextos
+    private TextStyle S => TextStyle.Current;
+    private bool rankingCreatedByCode, statusCreatedByCode;
 
     private bool IsOnline => SocketClient.Instance != null && SocketClient.Instance.IsConnected;
     private int MySlot => GameSession.MySlot;
@@ -159,6 +171,7 @@ public class GameManager : MonoBehaviour
     {
         if (btnTurbo != null) btnTurbo.onClick.AddListener(ActivateTurbo);
         if (btnCongelar != null) btnCongelar.onClick.AddListener(ActivateFreeze);
+        if (btnTeleport != null) btnTeleport.onClick.AddListener(ActivateTeleport);
 
         audioSource = GetComponent<AudioSource>();
         if (audioSource == null) audioSource = gameObject.AddComponent<AudioSource>();
@@ -239,7 +252,7 @@ public class GameManager : MonoBehaviour
         {
             int totalSeconds = Mathf.CeilToInt(gameTime);
             timerText.text = string.Format("{0}:{1:D2}", totalSeconds / 60, totalSeconds % 60);
-            timerText.color = totalSeconds <= 10 ? new Color(1f, 0.3f, 0.3f) : Color.white;
+            timerText.color = totalSeconds <= 10 ? S.timerWarningColor : S.timerColor;
         }
 
         // El final lo decide el servidor (GAME_OVER); aquí solo se muestra el reloj
@@ -266,6 +279,7 @@ public class GameManager : MonoBehaviour
         gameOverHandled = true;
 
         gameActive = false;
+        CloseTeleportPicker();
         SetLocalPlayerLocked(true);
         if (timerText != null) timerText.text = "0:00";
         ShowStatus("¡TIEMPO!", 5f, new Color(1f, 0.3f, 0.3f));
@@ -307,10 +321,12 @@ public class GameManager : MonoBehaviour
         GameObject prefab = maizNormalPrefab;
         if (type == ItemType.SpeedBoost && maizVelocidadPrefab != null) prefab = maizVelocidadPrefab;
         else if (type == ItemType.Freeze && maizCongelarPrefab != null) prefab = maizCongelarPrefab;
+        else if (type == ItemType.Teleport && maizTeleportPrefab != null) prefab = maizTeleportPrefab;
 
         GameObject itemObj = Instantiate(prefab, new Vector3(position.x, position.y, 0f), Quaternion.identity);
         itemObj.name = "Maiz_" + id + "_" + type;
-        itemObj.transform.localScale = prefab.transform.localScale * itemScale; // maíces más pequeños
+        float scale = type == ItemType.Teleport ? teleportItemScale : itemScale; // el de teletransporte tiene su propio tamaño
+        itemObj.transform.localScale = prefab.transform.localScale * scale;
 
         CollectibleItem itemScript = itemObj.GetComponent<CollectibleItem>();
         if (itemScript == null) itemScript = itemObj.AddComponent<CollectibleItem>();
@@ -360,6 +376,12 @@ public class GameManager : MonoBehaviour
                 GameFx.FloatingText(p, "+2  TURBO", new Color(1f, 0.85f, 0.2f));
                 ShowStatus("¡Ganaste una carga de TURBO!", 1.5f, new Color(1f, 0.85f, 0.2f));
             }
+            else if (type == ItemType.Teleport)
+            {
+                Play(specialClip != null ? specialClip : pickupClip);
+                GameFx.FloatingText(p, "+5  TELETRANSPORTE", Color.white);
+                ShowStatus("¡Ganaste un TELETRANSPORTE! Úsalo para robarle el lugar a un rival", 2.5f, Color.white);
+            }
             else
             {
                 Play(specialClip != null ? specialClip : pickupClip);
@@ -394,10 +416,11 @@ public class GameManager : MonoBehaviour
         UpdateRanking();
     }
 
-    public void OnChargesUpdate(int speed, int freeze)
+    public void OnChargesUpdate(int speed, int freeze, int teleport)
     {
         turboCharges = speed;
         freezeCharges = freeze;
+        teleportCharges = teleport;
         RefreshPowerUpButtons();
     }
 
@@ -444,6 +467,207 @@ public class GameManager : MonoBehaviour
     public void TryFreezeTargetPlayer(int targetSlot)
     {
         ActivateFreeze();
+    }
+
+    // =================================================================================
+    //  TELETRANSPORTE: cambias de lugar con el rival que escojas
+    // =================================================================================
+
+    // Botón TELETRANSPORTE
+    public void ActivateTeleport()
+    {
+        if (!CanRequestPowerUp()) return;
+        if (teleportCharges <= 0)
+        {
+            ShowStatus("Recoge el maíz de teletransporte para poder usarlo", 1.5f, Color.white);
+            return;
+        }
+
+        List<int> rivals = new List<int>(remotePlayers.Keys);
+        rivals.Sort();
+        if (rivals.Count == 0)
+        {
+            ShowStatus("No hay rivales para cambiar de lugar", 1.5f, Color.white);
+            return;
+        }
+
+        // Un solo rival: cambio directo. Varios: el jugador escoge con quién.
+        if (rivals.Count == 1) SendTeleport(rivals[0]);
+        else OpenTeleportPicker(rivals);
+    }
+
+    private void SendTeleport(int targetSlot)
+    {
+        CloseTeleportPicker();
+        if (!gameActive || !IsOnline) return;
+
+        nextPowerUpRequest = Time.time + 0.4f;
+        SocketClient.Instance.SendMessageToServer("USE_POWERUP",
+            new PowerUpRequestPayload { senderSlot = MySlot, powerUpType = "TELEPORT", targetSlot = targetSlot });
+    }
+
+    // Panel con un botón por rival (con su pollo y su puntaje)
+    private void OpenTeleportPicker(List<int> rivals)
+    {
+        CloseTeleportPicker();
+
+        Canvas canvas = scoreText != null ? scoreText.canvas : FindAnyObjectByType<Canvas>();
+        if (canvas == null) { SendTeleport(rivals[0]); return; }
+        canvas = canvas.rootCanvas;
+
+        teleportPicker = new GameObject("PanelTeletransporte", typeof(RectTransform), typeof(Image));
+        teleportPicker.transform.SetParent(canvas.transform, false);
+        Canvas pc = teleportPicker.AddComponent<Canvas>();
+        pc.overrideSorting = true;
+        pc.sortingOrder = 900;
+        teleportPicker.AddComponent<GraphicRaycaster>();
+
+        float buttonW = 300f, gap = 30f;
+        float width = rivals.Count * buttonW + (rivals.Count + 1) * gap;
+
+        RectTransform prt = teleportPicker.GetComponent<RectTransform>();
+        prt.anchorMin = prt.anchorMax = prt.pivot = new Vector2(0.5f, 0.5f);
+        prt.sizeDelta = new Vector2(Mathf.Max(width, 700f), 470f);
+        teleportPicker.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0.75f);
+
+        TextMeshProUGUI title = CreateUIText(teleportPicker.transform, "Titulo", new Vector2(0.5f, 1f),
+            new Vector2(0f, -20f), new Vector2(prt.sizeDelta.x - 40f, 70f), 44f, TextAlignmentOptions.Center);
+        S.Apply(title, S.avisos, false);
+        title.color = Color.white;
+        title.text = teleportPickerTitle;
+
+        float startX = -(rivals.Count - 1) * (buttonW + gap) * 0.5f;
+        for (int i = 0; i < rivals.Count; i++)
+        {
+            int slot = rivals[i];
+            CreateRivalButton(teleportPicker.transform, slot, new Vector2(startX + i * (buttonW + gap), 20f), buttonW);
+        }
+
+        CreatePanelButton(teleportPicker.transform, "BtnCancelar", "Cancelar", new Vector2(0f, 20f),
+            new Color(0.35f, 0.35f, 0.35f), CloseTeleportPicker);
+
+        CancelInvoke(nameof(CloseTeleportPicker));
+        Invoke(nameof(CloseTeleportPicker), teleportPickerTimeout);
+    }
+
+    private void CreateRivalButton(Transform parent, int slot, Vector2 pos, float size)
+    {
+        GameObject go = new GameObject("Rival_J" + (slot + 1), typeof(RectTransform), typeof(Image), typeof(Button));
+        go.transform.SetParent(parent, false);
+        RectTransform rt = go.GetComponent<RectTransform>();
+        rt.anchorMin = rt.anchorMax = rt.pivot = new Vector2(0.5f, 0.5f);
+        rt.anchoredPosition = pos;
+        rt.sizeDelta = new Vector2(size, 230f);
+
+        Image bg = go.GetComponent<Image>();
+        bg.color = new Color(1f, 1f, 1f, 0.9f);
+        Button b = go.GetComponent<Button>();
+        b.targetGraphic = bg;
+        b.onClick.AddListener(() => SendTeleport(slot));
+        go.AddComponent<UIButtonFeedback>();
+        AudioManager.AddClickSound(b);
+
+        // Dibujo del pollo de ese rival
+        int idx = GameSession.ChickenOf(slot);
+        Sprite icon = (chickenSkins != null && idx >= 0 && idx < chickenSkins.Length && chickenSkins[idx] != null)
+            ? chickenSkins[idx].normal
+            : (chickenSprites != null && idx >= 0 && idx < chickenSprites.Length ? chickenSprites[idx] : null);
+        if (icon != null)
+        {
+            GameObject img = new GameObject("Pollo", typeof(RectTransform), typeof(Image));
+            img.transform.SetParent(go.transform, false);
+            RectTransform irt = img.GetComponent<RectTransform>();
+            irt.anchorMin = irt.anchorMax = irt.pivot = new Vector2(0.5f, 0.5f);
+            irt.anchoredPosition = new Vector2(0f, 25f);
+            irt.sizeDelta = new Vector2(130f, 130f);
+            Image im = img.GetComponent<Image>();
+            im.sprite = icon;
+            im.preserveAspect = true;
+            im.raycastTarget = false;
+        }
+
+        scoresBySlot.TryGetValue(slot, out int pts);
+        TextMeshProUGUI label = CreateUIText(go.transform, "Nombre", new Vector2(0.5f, 0f), new Vector2(0f, 12f),
+            new Vector2(size - 20f, 60f), 34f, TextAlignmentOptions.Center);
+        S.Apply(label, S.botonesFinal, false);
+        label.color = Color.black;
+        label.outlineWidth = 0f;
+        label.text = "J" + (slot + 1) + "  ·  " + pts + " pts";
+    }
+
+    private void CloseTeleportPicker()
+    {
+        CancelInvoke(nameof(CloseTeleportPicker));
+        if (teleportPicker != null) Destroy(teleportPicker);
+        teleportPicker = null;
+    }
+
+    // El servidor hizo aparecer el maíz de teletransporte
+    public void OnTeleportSpawned(int itemID, float x, float y, float duration)
+    {
+        if (gameOverHandled) return;
+        SpawnItem(itemID, ItemType.Teleport, new Vector2(x, y), true);
+        if (items.TryGetValue(itemID, out CollectibleItem item) && item != null) item.SetLifetime(duration);
+
+        if (teleportSpawnClip != null)
+        {
+            Play(teleportSpawnClip);
+            if (duckMusicOnTeleport) AudioManager.Instance?.DuckMusic(Mathf.Min(teleportSpawnClip.length, duration));
+        }
+        ShowStatus("¡Apareció el maíz de TELETRANSPORTE!", 2.5f, Color.white);
+    }
+
+    // Nadie lo cogió a tiempo: desaparece
+    public void OnItemExpired(int itemID)
+    {
+        if (!items.TryGetValue(itemID, out CollectibleItem item)) return;
+        items.Remove(itemID);
+        if (item == null) return;
+        GameFx.Pop(item.GetComponentInChildren<SpriteRenderer>());
+        Destroy(item.gameObject);
+    }
+
+    // El servidor cambió de lugar a dos pollos
+    public void OnTeleportSwap(int slotA, int slotB, Vector2 posA, Vector2 posB)
+    {
+        if (!gameActive) return;
+
+        MovePlayerTo(slotA, posA);
+        MovePlayerTo(slotB, posB);
+
+        if (slotA == MySlot)
+        {
+            Play(teleportUseClip);
+            ShowStatus("¡Le robaste el lugar a " + GameSession.PlayerName(slotB) + "!", 2f, Color.white);
+        }
+        else if (slotB == MySlot)
+        {
+            Play(teleportUseClip);
+            ShowStatus("¡" + GameSession.PlayerName(slotA) + " te robó el lugar!", 2f, Color.white);
+        }
+    }
+
+    private void MovePlayerTo(int slot, Vector2 pos)
+    {
+        if (slot == MySlot && localPlayer != null)
+        {
+            Rigidbody2D rb = localPlayer.GetComponent<Rigidbody2D>();
+            if (rb != null)
+            {
+                rb.position = pos;
+                rb.linearVelocity = Vector2.zero;
+            }
+            localPlayer.transform.position = new Vector3(pos.x, pos.y, localPlayer.transform.position.z);
+            lastSentPos = pos;
+            ChickenAnimator anim = localPlayer.GetComponent<ChickenAnimator>();
+            if (anim != null) anim.ResetMotion();
+            GameFx.FloatingText(localPlayer.transform.position, "¡TELETRANSPORTE!", Color.white);
+        }
+        else if (remotePlayers.TryGetValue(slot, out RemotePlayer rp) && rp != null)
+        {
+            rp.Snap(pos);
+            GameFx.FloatingText(rp.transform.position, "¡ZAS!", Color.white);
+        }
     }
 
     private bool CanRequestPowerUp()
@@ -663,12 +887,8 @@ public class GameManager : MonoBehaviour
 
         TextMeshPro tmp = label.AddComponent<TextMeshPro>();
         tmp.text = text;
-        tmp.fontSize = 22f;
-        tmp.fontStyle = FontStyles.Bold;
         tmp.alignment = TextAlignmentOptions.Center;
-        tmp.color = popupTextColor;          // etiquetas "TÚ" / "J2"
-        tmp.outlineWidth = popupOutlineWidth;
-        tmp.outlineColor = popupOutlineColor;
+        S.Apply(tmp, S.etiquetas);           // etiquetas "TÚ" / "J2"
         tmp.sortingOrder = 250;
         tmp.rectTransform.sizeDelta = new Vector2(20f, 5f);
     }
@@ -719,18 +939,17 @@ public class GameManager : MonoBehaviour
             sb.AppendLine(me ? "<b>" + line + "</b>" : line); // mi fila en negrita
         }
         rankingText.text = sb.ToString();
-        rankingText.color = popupTextColor;
-        rankingText.outlineColor = popupOutlineColor;
-        rankingText.outlineWidth = popupOutlineWidth;
     }
 
     private void RefreshPowerUpButtons()
     {
         SetButtonState(btnTurbo, turboCharges > 0);
         SetButtonState(btnCongelar, freezeCharges > 0);
+        SetButtonState(btnTeleport, teleportCharges > 0);
 
         if (turboBadge != null) turboBadge.text = "x" + turboCharges;
         if (freezeBadge != null) freezeBadge.text = "x" + freezeCharges;
+        if (teleportBadge != null) teleportBadge.text = "x" + teleportCharges;
     }
 
     private void SetButtonState(Button btn, bool active)
@@ -750,27 +969,20 @@ public class GameManager : MonoBehaviour
         fb.SetDimmed(!active);
     }
 
+    // Aplica el estilo de EstiloTextos. Si el texto lo pusiste tú en la escena, se respeta su tamaño.
     private void ApplyPopupStyle()
     {
-        GameFx.PopupColor = popupTextColor;
-        GameFx.PopupOutlineColor = popupOutlineColor;
-        GameFx.PopupOutlineWidth = popupOutlineWidth;
-
-        if (statusText != null)
-        {
-            statusText.color = popupTextColor;
-            statusText.outlineColor = popupOutlineColor;
-            statusText.outlineWidth = popupOutlineWidth;
-            statusText.fontStyle = FontStyles.Bold;
-        }
+        if (statusText != null) S.Apply(statusText, S.avisos, statusCreatedByCode);
+        if (rankingText != null) S.Apply(rankingText, S.rankingPartida, rankingCreatedByCode);
+        if (timerText != null) timerText.color = S.timerColor;
     }
 
-    // El parámetro color se ignora: todos los avisos usan Popup Text Color
+    // El parámetro color se ignora: todos los avisos usan el color de EstiloTextos > Avisos
     private void ShowStatus(string text, float seconds, Color color)
     {
         if (statusText == null) return;
         statusText.text = text;
-        statusText.color = popupTextColor;
+        statusText.color = S.avisos.color;
         statusUntil = Time.time + seconds;
     }
 
@@ -782,12 +994,12 @@ public class GameManager : MonoBehaviour
         if (gameActive && localPlayer != null && localPlayer.IsFrozen)
         {
             statusText.text = "¡CONGELADO!";
-            statusText.color = popupTextColor;
+            statusText.color = S.avisos.color;
         }
         else if (gameActive && localPlayer != null && localPlayer.IsBoosted)
         {
             statusText.text = "TURBO ACTIVO";
-            statusText.color = popupTextColor;
+            statusText.color = S.avisos.color;
         }
         else
         {
@@ -814,6 +1026,7 @@ public class GameManager : MonoBehaviour
 
         if (rankingText == null)
         {
+            rankingCreatedByCode = true;
             rankingText = CreateUIText(canvas.transform, "RankingText",
                 new Vector2(1f, 1f), new Vector2(-30f, -30f), new Vector2(360f, 230f), 30f,
                 TextAlignmentOptions.TopRight);
@@ -821,6 +1034,7 @@ public class GameManager : MonoBehaviour
 
         if (statusText == null)
         {
+            statusCreatedByCode = true;
             statusText = CreateUIText(canvas.transform, "StatusText",
                 new Vector2(0.5f, 1f), new Vector2(0f, -150f), new Vector2(1000f, 80f), 42f,
                 TextAlignmentOptions.Center);
@@ -828,6 +1042,7 @@ public class GameManager : MonoBehaviour
 
         if (btnTurbo != null) turboBadge = CreateBadge(btnTurbo);
         if (btnCongelar != null) freezeBadge = CreateBadge(btnCongelar);
+        if (btnTeleport != null) teleportBadge = CreateBadge(btnTeleport);
     }
 
     private TextMeshProUGUI CreateBadge(Button btn)
@@ -839,9 +1054,7 @@ public class GameManager : MonoBehaviour
             new Vector2(1f, 1f), new Vector2(10f, 10f), new Vector2(110f, 60f), 40f,
             TextAlignmentOptions.TopRight);
         t.fontStyle = FontStyles.Bold;
-        t.color = popupTextColor;            // contadores "x2" de los botones
-        t.outlineWidth = popupOutlineWidth;
-        t.outlineColor = popupOutlineColor;
+        S.Apply(t, S.contadores);            // contadores "x2" de los botones
         t.raycastTarget = false;
         return t;
     }
@@ -861,6 +1074,7 @@ public class GameManager : MonoBehaviour
 
         TextMeshProUGUI t = go.AddComponent<TextMeshProUGUI>();
         t.fontSize = fontSize;
+        S.ApplyFont(t);
         t.alignment = align;
         t.color = Color.white;
         t.raycastTarget = false;
@@ -976,7 +1190,7 @@ public class GameManager : MonoBehaviour
             RectTransform irt = CreateResultsImage(panel.transform, bg);
 
             TextMeshProUGUI rank = CreateUIText(irt, "TextoRanking", new Vector2(0.5f, 0.5f), Vector2.zero, Vector2.zero,
-                txt.rankingFontSize, TextAlignmentOptions.Center);
+                S.rankingFinal.size, TextAlignmentOptions.Center);
             RectTransform rrt = rank.rectTransform;
             Vector2 c = new Vector2(0.5f, 0.5f) + rankingPosition;
             rrt.anchorMin = c - rankingSize * 0.5f;
@@ -985,12 +1199,9 @@ public class GameManager : MonoBehaviour
 
             rank.enableAutoSizing = true;
             rank.fontSizeMin = 10f;
-            rank.fontSizeMax = txt.rankingFontSize;
-            rank.color = popupTextColor;         // ranking final
-            rank.outlineWidth = txt.rankingOutline;
-            rank.outlineColor = popupOutlineColor;
+            rank.fontSizeMax = S.rankingFinal.size;
+            S.Apply(rank, S.rankingFinal, false); // ranking final
             rank.text = sb.ToString().TrimEnd();
-            if (resultsFont != null) rank.font = resultsFont;
 
             if (imageHasButtons)
             {
@@ -1010,8 +1221,7 @@ public class GameManager : MonoBehaviour
             tmp.fontSizeMin = 18f;
             tmp.fontSizeMax = 52f;
             tmp.text = sb.ToString();
-            tmp.color = popupTextColor;
-            if (resultsFont != null) tmp.font = resultsFont;
+            S.Apply(tmp, S.rankingFinal, false);
         }
 
         CreatePanelButton(panel.transform, "BtnJugarOtraVez", txt.playAgainButton, new Vector2(-260f, 60f),
@@ -1133,7 +1343,7 @@ public class GameManager : MonoBehaviour
         TextMeshProUGUI t = CreateUIText(btnObj.transform, "Texto", new Vector2(0.5f, 0.5f), Vector2.zero,
             new Vector2(440f, 110f), 40f, TextAlignmentOptions.Center);
         t.text = label;
-        if (resultsFont != null && resultsFontOnButtons) t.font = resultsFont;
+        S.Apply(t, S.botonesFinal);
     }
 
     private void BackToLobby()
@@ -1217,9 +1427,6 @@ public class ResultsTexts
     public bool showFooter = false;
     [Tooltip("Pintar con el color destacado las filas de los ganadores (apagado = todo blanco)")]
     public bool highlightWinnerRows = false;
-    [Tooltip("Tamaño máximo de letra del ranking dentro de la imagen")]
-    [Range(10, 80)] public float rankingFontSize = 30f;
-    [Range(0f, 0.5f)] public float rankingOutline = 0.2f;
     public Color highlightColor = new Color(1f, 0.835f, 0.29f);  // título y ganadores
     [Range(50, 250)] public int titleSize = 130;     // % del tamaño normal
     [Range(50, 200)] public int subtitleSize = 90;

@@ -42,9 +42,6 @@ public class LobbyCustomization : MonoBehaviour
 
     [Header("Aviso al guardar (opcional)")]
     [SerializeField] private string savedMessage = "¡Guardado!";
-    [SerializeField] private Color savedTextColor = Color.black;
-    [SerializeField] private Color savedOutlineColor = Color.white;
-    [SerializeField, Range(0f, 0.5f)] private float savedOutlineWidth = 0.2f;
 
     private int localPlayerSlot = 0;
     private int confirmedChicken = 0; // el que tiene el servidor
@@ -381,12 +378,8 @@ public class LobbyCustomization : MonoBehaviour
 
         TextMeshProUGUI t = go.AddComponent<TextMeshProUGUI>();
         t.text = savedMessage;
-        t.fontSize = 40f;
-        t.fontStyle = FontStyles.Bold;
         t.alignment = TextAlignmentOptions.Center;
-        t.color = savedTextColor;
-        t.outlineWidth = savedOutlineWidth;
-        t.outlineColor = savedOutlineColor;
+        TextStyle.Current.Apply(t, TextStyle.Current.guardadoLobby); // se edita en EstiloTextos
         t.raycastTarget = false;
 
         StartCoroutine(FadeAndDestroy(t, rt, 1.2f));

@@ -258,6 +258,27 @@ public class SocketClient : MonoBehaviour
                     break;
                 }
 
+            case "TELEPORT_SPAWNED":
+                {
+                    TeleportSpawnedPayload d = JsonUtility.FromJson<TeleportSpawnedPayload>(msg.payload);
+                    gm?.OnTeleportSpawned(d.itemID, d.posX, d.posY, d.duration);
+                    break;
+                }
+
+            case "ITEM_EXPIRED":
+                {
+                    ItemExpiredPayload d = JsonUtility.FromJson<ItemExpiredPayload>(msg.payload);
+                    gm?.OnItemExpired(d.itemID);
+                    break;
+                }
+
+            case "TELEPORT_SWAP":
+                {
+                    TeleportSwapPayload d = JsonUtility.FromJson<TeleportSwapPayload>(msg.payload);
+                    gm?.OnTeleportSwap(d.slotA, d.slotB, new Vector2(d.aX, d.aY), new Vector2(d.bX, d.bY));
+                    break;
+                }
+
             case "SCORE_UPDATE":
                 {
                     ScoreUpdatePayload d = JsonUtility.FromJson<ScoreUpdatePayload>(msg.payload);
@@ -268,7 +289,7 @@ public class SocketClient : MonoBehaviour
             case "CHARGES":
                 {
                     ChargesPayload d = JsonUtility.FromJson<ChargesPayload>(msg.payload);
-                    gm?.OnChargesUpdate(d.speedCharges, d.freezeCharges);
+                    gm?.OnChargesUpdate(d.speedCharges, d.freezeCharges, d.teleportCharges);
                     break;
                 }
 

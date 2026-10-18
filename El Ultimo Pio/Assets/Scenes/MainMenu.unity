@@ -1813,12 +1813,16 @@ MonoBehaviour:
   lobbySceneName: Lobby
   joinPanel: {fileID: 1822822607}
   ipInputField: {fileID: 526198843}
-  defaultIP: 192.168.
+  codePlaceholder: "C\xF3digo de sala (ej. C0A8-0117 o solo 17)"
+  codeMaxLength: 15
   messageText: {fileID: 2020348705}
-  allowSoloForTesting: 1
+  allowSoloForTesting: 0
   speedCornCount: 3
   freezeCornCount: 3
   specialRespawnDelay: 15
+  teleportSpawnInterval: 20
+  teleportLifetime: 8
+  teleportPoints: 5
 --- !u!1 &1203929693
 GameObject:
   m_ObjectHideFlags: 0

@@ -4,7 +4,8 @@ public enum ItemType
 {
     Normal = 0,     // +1 punto
     SpeedBoost = 1, // +2 puntos y 1 carga de TURBO
-    Freeze = 2      // +2 puntos y 1 carga de HIELO
+    Freeze = 2,     // +2 puntos y 1 carga de HIELO
+    Teleport = 3    // +5 puntos y 1 carga de TELETRANSPORTE (aparece cada 20 s y dura 8 s)
 }
 
 public class CollectibleItem : MonoBehaviour
@@ -29,6 +30,15 @@ public class CollectibleItem : MonoBehaviour
     public void PlaySpawnAnimation()
     {
         spawnAnim = 0f;
+    }
+
+    // Para el maíz de teletransporte: cuándo desaparece (parpadea los últimos 2 segundos)
+    private float expiresAt = -1f;
+    private SpriteRenderer[] renderers;
+
+    public void SetLifetime(float seconds)
+    {
+        expiresAt = Time.time + seconds;
     }
 
     private void Awake()
@@ -64,6 +74,14 @@ public class CollectibleItem : MonoBehaviour
         }
 
         transform.localScale = baseScale * pulse;
+
+        if (expiresAt > 0f)
+        {
+            if (renderers == null) renderers = GetComponentsInChildren<SpriteRenderer>();
+            float left = expiresAt - Time.time;
+            bool visible = left > 2f || Mathf.Repeat(Time.time * 8f, 1f) > 0.35f; // parpadeo final
+            foreach (SpriteRenderer r in renderers) if (r != null) r.enabled = visible;
+        }
     }
 
     private void OnTriggerEnter2D(Collider2D other) { TryRequest(other); }

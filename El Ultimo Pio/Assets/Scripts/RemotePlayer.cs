@@ -24,6 +24,14 @@ public class RemotePlayer : MonoBehaviour
         target = position;
     }
 
+    // Teletransporte: aparece de golpe en la nueva posición (sin deslizarse)
+    public void Snap(Vector2 position)
+    {
+        target = position;
+        transform.position = target;
+        if (Anim != null) Anim.ResetMotion();
+    }
+
     private void Update()
     {
         float t = 1f - Mathf.Exp(-smoothing * Time.deltaTime);

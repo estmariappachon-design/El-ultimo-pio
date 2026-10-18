@@ -101,13 +101,39 @@ public class ChargesPayload
 {
     public int speedCharges;
     public int freezeCharges;
+    public int teleportCharges;
+}
+
+[Serializable]
+public class TeleportSpawnedPayload
+{
+    public int itemID;
+    public float posX;
+    public float posY;
+    public float duration;
+}
+
+[Serializable]
+public class ItemExpiredPayload
+{
+    public int itemID;
+}
+
+[Serializable]
+public class TeleportSwapPayload
+{
+    public int slotA;   // quien usó el teletransporte
+    public int slotB;   // con quien cambió
+    public float aX, aY; // nueva posición de A
+    public float bX, bY; // nueva posición de B
 }
 
 [Serializable]
 public class PowerUpRequestPayload
 {
     public int senderSlot;
-    public string powerUpType; // "SPEED" o "FREEZE"
+    public string powerUpType; // "SPEED", "FREEZE" o "TELEPORT"
+    public int targetSlot = -1; // solo TELEPORT: con quién cambiar
 }
 
 [Serializable]
