@@ -18,7 +18,7 @@ using UnityEngine.UI;
 public class ResponsiveUI : MonoBehaviour
 {
     [Tooltip("Todo el diseño 1920x1080 cabe completo en cualquier pantalla (recomendado)")]
-    public bool expandToFit = true;
+    public bool expandToFit = false;
 
     [Tooltip("Orden de dibujo de la interfaz en 'Screen Space - Camera' (más alto = más al frente)")]
     public int uiSortingOrder = 400;

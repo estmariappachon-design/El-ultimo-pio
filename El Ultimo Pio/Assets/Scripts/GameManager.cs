@@ -29,6 +29,7 @@ public class GameManager : MonoBehaviour
     [SerializeField] private TextMeshProUGUI scoreText;
     [Tooltip("{0} = puntos, {1} = maíces recogidos")]
     [SerializeField] private string scoreFormat = "{0} pts  |  {1} maíces";
+    [SerializeField] private int targetScore = 50;
     [SerializeField] private TextMeshProUGUI rankingText;   // opcional (arriba a la derecha)
     [SerializeField] private TextMeshProUGUI statusText;    // opcional (centro, debajo del tiempo)
 
@@ -706,6 +707,7 @@ public class GameManager : MonoBehaviour
             {
                 localPlayer.FreezePlayer(duration);
                 Play(frozenClip);
+                Haptics.Vibrate(400);   // <-- NUEVA LÍNEA: vibra el celular del congelado
                 ShowStatus("¡" + GameSession.PlayerName(senderSlot) + " te congeló!", duration, new Color(0.5f, 0.85f, 1f));
                 GameFx.FloatingText(localPlayer.transform.position, "¡CONGELADO!", new Color(0.5f, 0.85f, 1f));
             }
@@ -920,7 +922,7 @@ public class GameManager : MonoBehaviour
     private void UpdateScoreUI()
     {
         if (scoreText != null)
-            scoreText.text = string.Format(scoreFormat, myScore, myItems);
+            scoreText.text = string.Format(scoreFormat, myScore, myItems, targetScore);
     }
 
     private void UpdateRanking()
