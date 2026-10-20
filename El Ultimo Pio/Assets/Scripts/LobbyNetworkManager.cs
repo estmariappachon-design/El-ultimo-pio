@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using TMPro;
 
 public class LobbyNetworkManager : MonoBehaviour
@@ -9,12 +10,16 @@ public class LobbyNetworkManager : MonoBehaviour
     [SerializeField] private LobbyStartController startController;
 
     [Header("UI Info Red")]
-    [SerializeField] private TextMeshProUGUI roomIPText; // Arrastra un texto TMP en el Lobby
+    [SerializeField] private TextMeshProUGUI roomIPText; // Text_IP_Sala
 
-    [Header("ConexiÛn (opcional)")]
-    [SerializeField] private string serverIP = "";
+    [Header("Textos de la sala ({code} = c√≥digo completo, {short} = final del c√≥digo, {n} = jugadores)")]
+    [TextArea] [SerializeField] private string hostRoomFormat = "C√ìDIGO DE SALA: {code}\nEn la misma Wi-Fi basta: {short}\nJugadores: {n}/4";
+    [TextArea] [SerializeField] private string clientRoomFormat = "Sala {code}\nJugadores: {n}/4";
 
-    public int MySlot => GameSession.MySlot;
+    [Header("Escenas")]
+    [SerializeField] private string mainMenuSceneName = "MainMenu";
+
+    private int playerCount = 1;
 
     private void Awake()
     {
@@ -28,29 +33,37 @@ public class LobbyNetworkManager : MonoBehaviour
 
     private void Start()
     {
-        if (SocketClient.Instance == null)
-            new GameObject("SocketClient").AddComponent<SocketClient>();
-
-        if (!string.IsNullOrWhiteSpace(serverIP))
-            SocketClient.Instance.serverIP = serverIP.Trim();
-
-        // Mostrar la IP en pantalla para que los dem·s la copien
-        if (roomIPText != null)
+        // Se llega al lobby SIEMPRE desde el men√∫ (ya conectado) o volviendo de una partida
+        if (SocketClient.Instance == null || !SocketClient.Instance.IsConnected)
         {
-            string myIP = IPManager.GetLocalIPAddress();
-            roomIPText.text = "IP SALA: " + myIP;
+            GameSession.LastError = "No hay conexi√≥n con la sala. Vuelve a crearla o a unirte.";
+            SceneManager.LoadScene(mainMenuSceneName);
+            return;
         }
 
-        if (!SocketClient.Instance.IsConnected)
-            SocketClient.Instance.ConnectToServer();
-
-        SocketClient.Instance.SendMessageToServer("LOBBY_REFRESH", new object());
+        RefreshRoomText();
+        SocketClient.Instance.SendMessageToServer("LOBBY_REFRESH", new EmptyPayload());
     }
 
-    // occupiedSlots: slots realmente ocupados (puede venir null con servidores viejos)
-    public void OnPlayerListUpdated(int totalPlayers, bool isHost, int mySlot, int[] occupiedSlots = null)
+    private void RefreshRoomText()
     {
-        GameSession.MySlot = mySlot; // Guardamos la asignaciÛn
+        if (roomIPText == null) return;
+
+        // El anfitri√≥n muestra el c√≥digo de SU IP; los dem√°s, el de la sala a la que se unieron
+        string ip = GameServer.IsRunning ? IPManager.GetLocalIPAddress() : SocketClient.Instance.serverIP;
+        string format = GameServer.IsRunning ? hostRoomFormat : clientRoomFormat;
+
+        roomIPText.text = format
+            .Replace("{code}", RoomCode.FromIP(ip))
+            .Replace("{short}", RoomCode.ShortFromIP(ip))
+            .Replace("{n}", playerCount.ToString());
+    }
+
+    // occupiedSlots: slots realmente ocupados
+    public void OnPlayerListUpdated(int totalPlayers, bool isHost, int mySlot, int[] occupiedSlots)
+    {
+        GameSession.MySlot = mySlot;
+        playerCount = totalPlayers;
 
         if (customizationController != null)
         {
@@ -67,6 +80,8 @@ public class LobbyNetworkManager : MonoBehaviour
             startController.SetHost(isHost);
             startController.SetPlayerCount(totalPlayers);
         }
+
+        RefreshRoomText();
     }
 
     public void OnPlayerChangedChicken(int slot, int chickenIndex)
@@ -81,18 +96,18 @@ public class LobbyNetworkManager : MonoBehaviour
         SocketClient.Instance?.SendMessageToServer("SET_CHICKEN", payload);
     }
 
+    // Conectado al OnClick de BtnEmpezar
     public void OnStartGamePressed()
     {
-        SocketClient.Instance?.SendMessageToServer("START_GAME", new object());
+        if (startController != null && !startController.CanStart) return;
+        SocketClient.Instance?.SendMessageToServer("START_GAME", new EmptyPayload());
     }
 
-    // ConÈctalo al botÛn Home (adem·s de SceneLoader.LoadMainMenu) para liberar tu lugar en el servidor
+    // Conectado al bot√≥n Home
     public void LeaveLobby()
     {
-        // 1. Desconecta el socket para liberar el slot en el servidor
         SocketClient.Instance?.Disconnect();
-
-        // 2. Carga la escena del men˙ principal
-        UnityEngine.SceneManagement.SceneManager.LoadScene("MainMenu");
+        if (GameServer.IsRunning) GameServer.StopServer(); // si era el anfitri√≥n, cierra la sala
+        SceneManager.LoadScene(mainMenuSceneName);
     }
 }

@@ -1,0 +1,2 @@
+C:\Users\EQTMCS-1353\Desktop\El-ultimo-pio\El Ultimo Pio\Library\Bee\Android\Prj\IL2CPP\Gradle\unityLibrary\src\main\cpp\CMakeLists.txt
+C:\Users\EQTMCS-1353\Desktop\El-ultimo-pio\El Ultimo Pio\Library\Bee\Android\Prj\IL2CPP\Gradle\unityLibrary\src\main\cpp\GameActivity\CMakeLists.txt

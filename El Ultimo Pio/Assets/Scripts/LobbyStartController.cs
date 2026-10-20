@@ -1,33 +1,30 @@
 using UnityEngine;
 using UnityEngine.UI;
+using TMPro;
 
+// Controla si el botÃ³n EMPEZAR se puede pulsar: solo el host y con 2 a 4 jugadores.
+// El clic se conecta en el Inspector (OnClick de BtnEmpezar -> LobbyNetworkManager.OnStartGamePressed).
 public class LobbyStartController : MonoBehaviour
 {
-    [SerializeField] private Button startButton; // El botón EMPEZAR (BtnEmpezar)
+    [SerializeField] private Button startButton;               // BtnEmpezar
+    [SerializeField] private TextMeshProUGUI waitingText;      // opcional: "Esperando jugadores..."
 
     private bool isHost = false;
     private int playerCount = 1;
 
+    public bool CanStart => isHost && playerCount >= GameSession.MinPlayers && playerCount <= GameServer.MaxPlayers;
+
     private void Start()
     {
-        if (startButton != null)
-        {
-            // El clic se conecta por código, no hace falta ponerlo en el OnClick del Inspector
-            startButton.onClick.RemoveListener(OnStartButtonClicked);
-            startButton.onClick.AddListener(OnStartButtonClicked);
-        }
-
         UpdateStartButton();
     }
 
-    // Lo llama LobbyNetworkManager cuando el servidor dice si este jugador es Host
     public void SetHost(bool value)
     {
         isHost = value;
         UpdateStartButton();
     }
 
-    // Lo llama LobbyNetworkManager cuando entra o sale alguien del lobby
     public void SetPlayerCount(int count)
     {
         playerCount = count;
@@ -36,19 +33,21 @@ public class LobbyStartController : MonoBehaviour
 
     private void UpdateStartButton()
     {
-        if (startButton == null) return;
+        if (startButton != null)
+        {
+            // Solo el host ve el botÃ³n; los demÃ¡s esperan a que Ã©l empiece
+            startButton.gameObject.SetActive(isHost);
+            startButton.interactable = CanStart;
+        }
 
-        // Solo se activa si es Host Y hay mínimo 2 jugadores
-        startButton.interactable = isHost && playerCount >= 2;
-    }
-
-    public void OnStartButtonClicked()
-    {
-        if (!isHost || playerCount < 2) return;
-
-        Debug.Log("¡Iniciando partida!");
-
-        // Le pide al servidor que inicie: el servidor avisa a TODOS y cada uno carga la escena de juego
-        LobbyNetworkManager.Instance?.OnStartGamePressed();
+        if (waitingText != null)
+        {
+            if (!isHost)
+                waitingText.text = "Esperando a que el anfitriÃ³n inicie...";
+            else if (playerCount < GameSession.MinPlayers)
+                waitingText.text = "Esperando jugadores (mÃ­nimo " + GameSession.MinPlayers + ")...";
+            else
+                waitingText.text = "Â¡Listos! Pulsa EMPEZAR";
+        }
     }
 }

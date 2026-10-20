@@ -1,0 +1,17 @@
+C:\Users\EQTMCS-1353\Desktop\El-ultimo-pio\El Ultimo Pio\Library\Bee\Android\Prj\IL2CPP\Gradle\unityLibrary\src\main\cpp\GameActivity\GAToUnityCallbacks.h
+C:\Users\EQTMCS-1353\Desktop\El-ultimo-pio\El Ultimo Pio\Library\Bee\Android\Prj\IL2CPP\Gradle\unityLibrary\src\main\cpp\GameActivity\MacroEnd.h
+C:\Users\EQTMCS-1353\Desktop\El-ultimo-pio\El Ultimo Pio\Library\Bee\Android\Prj\IL2CPP\Gradle\unityLibrary\src\main\cpp\GameActivity\MacroHeaderBegin.h
+C:\Users\EQTMCS-1353\Desktop\El-ultimo-pio\El Ultimo Pio\Library\Bee\Android\Prj\IL2CPP\Gradle\unityLibrary\src\main\cpp\GameActivity\MacroSourceBegin.h
+C:\Users\EQTMCS-1353\Desktop\El-ultimo-pio\El Ultimo Pio\Library\Bee\Android\Prj\IL2CPP\Gradle\unityLibrary\src\main\cpp\GameActivity\UGAApplication.h
+C:\Users\EQTMCS-1353\Desktop\El-ultimo-pio\El Ultimo Pio\Library\Bee\Android\Prj\IL2CPP\Gradle\unityLibrary\src\main\cpp\GameActivity\UGAConfiguration.h
+C:\Users\EQTMCS-1353\Desktop\El-ultimo-pio\El Ultimo Pio\Library\Bee\Android\Prj\IL2CPP\Gradle\unityLibrary\src\main\cpp\GameActivity\UGADebug.h
+C:\Users\EQTMCS-1353\Desktop\El-ultimo-pio\El Ultimo Pio\Library\Bee\Android\Prj\IL2CPP\Gradle\unityLibrary\src\main\cpp\GameActivity\UGAEvents.h
+C:\Users\EQTMCS-1353\Desktop\El-ultimo-pio\El Ultimo Pio\Library\Bee\Android\Prj\IL2CPP\Gradle\unityLibrary\src\main\cpp\GameActivity\UGAInput.h
+C:\Users\EQTMCS-1353\Desktop\El-ultimo-pio\El Ultimo Pio\Library\Bee\Android\Prj\IL2CPP\Gradle\unityLibrary\src\main\cpp\GameActivity\UGASoftKeyboard.h
+C:\Users\EQTMCS-1353\Desktop\El-ultimo-pio\El Ultimo Pio\Library\Bee\Android\Prj\IL2CPP\Gradle\unityLibrary\src\main\cpp\GameActivity\UGASoftKeyboardCallbacks.h
+C:\Users\EQTMCS-1353\Desktop\El-ultimo-pio\El Ultimo Pio\Library\Bee\Android\Prj\IL2CPP\Gradle\unityLibrary\src\main\cpp\GameActivity\UGATypes.h
+C:\Users\EQTMCS-1353\Desktop\El-ultimo-pio\El Ultimo Pio\Library\Bee\Android\Prj\IL2CPP\Gradle\unityLibrary\src\main\cpp\GameActivity\UGAVersion.h
+C:\Users\EQTMCS-1353\Desktop\El-ultimo-pio\El Ultimo Pio\Library\Bee\Android\Prj\IL2CPP\Gradle\unityLibrary\src\main\cpp\GameActivity\UnityToGACallbacks.h
+C:\Users\EQTMCS-1353\Desktop\El-ultimo-pio\El Ultimo Pio\Library\Bee\Android\Prj\IL2CPP\Gradle\unityLibrary\src\main\cpp\GameActivity\UnityToGAConfigurationCallbacks.h
+C:\Users\EQTMCS-1353\Desktop\El-ultimo-pio\El Ultimo Pio\Library\Bee\Android\Prj\IL2CPP\Gradle\unityLibrary\src\main\cpp\GameActivity\UnityToGAKeyEventCallbacks.h
+C:\Users\EQTMCS-1353\Desktop\El-ultimo-pio\El Ultimo Pio\Library\Bee\Android\Prj\IL2CPP\Gradle\unityLibrary\src\main\cpp\GameActivity\UnityToGAMotionEventCallbacks.h

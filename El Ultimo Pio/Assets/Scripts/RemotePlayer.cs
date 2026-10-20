@@ -1,15 +1,20 @@
 using UnityEngine;
 
-// Se agrega autom·ticamente a los pollos de los otros jugadores.
-// Solo se mueve hacia la ˙ltima posiciÛn que llegÛ por red, de forma suave.
+// Se agrega autom√°ticamente a los pollos de los otros jugadores.
+// Se mueve suavemente hacia la √∫ltima posici√≥n que lleg√≥ por red (interpolaci√≥n).
 public class RemotePlayer : MonoBehaviour
 {
     [SerializeField] private float smoothing = 15f;
 
+    public int Slot { get; private set; }
+    public ChickenAnimator Anim { get; private set; }
+
     private Vector3 target;
 
-    public void Init(Vector2 position)
+    public void Init(int slot, Vector2 position, ChickenAnimator anim)
     {
+        Slot = slot;
+        Anim = anim;
         target = position;
         transform.position = target;
     }
@@ -17,6 +22,14 @@ public class RemotePlayer : MonoBehaviour
     public void SetTarget(Vector2 position)
     {
         target = position;
+    }
+
+    // Teletransporte: aparece de golpe en la nueva posici√≥n (sin deslizarse)
+    public void Snap(Vector2 position)
+    {
+        target = position;
+        transform.position = target;
+        if (Anim != null) Anim.ResetMotion();
     }
 
     private void Update()
