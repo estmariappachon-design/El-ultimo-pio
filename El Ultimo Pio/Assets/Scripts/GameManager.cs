@@ -1030,7 +1030,7 @@ public class GameManager : MonoBehaviour
         {
             rankingCreatedByCode = true;
             rankingText = CreateUIText(canvas.transform, "RankingText",
-                new Vector2(1f, 1f), new Vector2(-30f, -30f), new Vector2(360f, 230f), 30f,
+                new Vector2(1f, 1f), new Vector2(-50f, -30f), new Vector2(360f, 230f), 30f,
                 TextAlignmentOptions.TopRight);
         }
 
